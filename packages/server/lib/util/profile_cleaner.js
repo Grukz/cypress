@@ -1,7 +1,7 @@
 const _ = require('lodash')
 const path = require('path')
 const debug = require('debug')('cypress:server:profilecleaner')
-const fs = require('./fs')
+const { fs } = require('./fs')
 const glob = require('./glob')
 const findProcess = require('./find_process')
 
@@ -17,7 +17,7 @@ const isCypressProcess = (process) => {
 
 const getPidFromFolder = (folder, pidPrefix) => {
   return _.toNumber(
-    path.basename(folder).replace(pidPrefix, '')
+    path.basename(folder).replace(pidPrefix, ''),
   )
 }
 

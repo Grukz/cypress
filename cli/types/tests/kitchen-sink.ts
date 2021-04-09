@@ -35,14 +35,14 @@ cy.visit('https://www.acme.com/', {
 
 const serverOptions: Partial<Cypress.ServerOptions> = {
   delay: 100,
-  whitelist: () => true
+  ignore: () => true
 }
 
 cy.server(serverOptions)
 
 Cypress.spec.name // $ExpectType string
-Cypress.spec.relative // $ExpectType string | null
-Cypress.spec.absolute // $ExpectType string | null
+Cypress.spec.relative // $ExpectType string
+Cypress.spec.absolute // $ExpectType string
 
 Cypress.browser // $ExpectType Browser
 
@@ -62,6 +62,7 @@ expect(stub).to.not.have.been.called
 stub()
 expect(stub).to.have.been.calledOnce
 cy.wrap(stub).should('have.been.calledOnce')
+cy.wrap(stub).should('be.calledOnce')
 
 namespace EventInterfaceTests {
   // window:confirm stubbing
@@ -83,6 +84,11 @@ cy.request({
   url: "http://localhost:3000/myressource",
   method: "POST",
   body: {}
+}).then((resp) => {
+  resp // $ExpectType Response
+  resp.redirectedToUrl // $ExpectType string | undefined
+  resp.redirects // $ExpectType string[] | undefined
+  resp.headers // $ExpectType { [key: string]: string | string[]; }
 })
 
 // specify query parameters
@@ -116,3 +122,35 @@ const obj = {
   foo: () => { }
 }
 cy.spy(obj, 'foo').as('my-spy')
+
+// use path-based access for nested structures
+cy.wrap({
+  foo: {
+    bar: 1
+  }
+}).its('foo.bar')
+
+cy.wrap({
+  foo: {
+    quux: () => 2
+  }
+}).invoke('foo.quux')
+
+// different clearLocalStorage signatures
+cy.clearLocalStorage()
+cy.clearLocalStorage('todos')
+cy.clearLocalStorage('todos', { log: false })
+cy.clearLocalStorage({ log: false })
+
+namespace BlobTests {
+  Cypress.Blob.imgSrcToDataURL('/some/path', undefined, 'anonymous')
+    .then((dateUrl) => {
+      dateUrl // $ExpectType string
+  })
+}
+
+cy.window().then(window => {
+  window // $ExpectType AUTWindow
+
+  window.eval('1')
+})

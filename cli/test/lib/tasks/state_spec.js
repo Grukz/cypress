@@ -5,6 +5,7 @@ const path = require('path')
 const Promise = require('bluebird')
 const proxyquire = require('proxyquire')
 const mockfs = require('mock-fs')
+const { expect } = require('chai')
 const debug = require('debug')('test')
 
 const fs = require(`${lib}/fs`)
@@ -20,7 +21,7 @@ const binaryPkgPath = path.join(
   'Contents',
   'Resources',
   'app',
-  'package.json'
+  'package.json',
 )
 
 describe('lib/tasks/state', function () {
@@ -32,8 +33,18 @@ describe('lib/tasks/state', function () {
     os.platform.returns('darwin')
   })
 
-  context('.getBinaryPkgVersionAsync', function () {
-    it('resolves version from version file when it exists', function () {
+  context('.getBinaryPkgVersion', function () {
+    it('returns version if present', () => {
+      expect(state.getBinaryPkgVersion({ version: '1.2.3' })).to.equal('1.2.3')
+    })
+
+    it('returns null if passed null', () => {
+      expect(state.getBinaryPkgVersion(null)).to.equal(null)
+    })
+  })
+
+  context('.getBinaryPkgAsync', function () {
+    it('resolves with loaded file when the file exists', function () {
       sinon
       .stub(fs, 'pathExistsAsync')
       .withArgs(binaryPkgPath)
@@ -44,8 +55,8 @@ describe('lib/tasks/state', function () {
       .withArgs(binaryPkgPath)
       .resolves({ version: '2.0.48' })
 
-      return state.getBinaryPkgVersionAsync(binaryDir).then((binaryVersion) => {
-        expect(binaryVersion).to.equal('2.0.48')
+      return state.getBinaryPkgAsync(binaryDir).then((result) => {
+        expect(result).to.deep.equal({ version: '2.0.48' })
       })
     })
 
@@ -53,9 +64,9 @@ describe('lib/tasks/state', function () {
       sinon.stub(fs, 'pathExistsAsync').resolves(false)
 
       return state
-      .getBinaryPkgVersionAsync(binaryDir)
-      .then((binaryVersion) => {
-        return expect(binaryVersion).to.equal(null)
+      .getBinaryPkgAsync(binaryDir)
+      .then((result) => {
+        return expect(result).to.equal(null)
       })
     })
 
@@ -75,9 +86,9 @@ describe('lib/tasks/state', function () {
       .resolves({ version: '3.4.5' })
 
       return state
-      .getBinaryPkgVersionAsync(customBinaryDir)
-      .then((binaryVersion) => {
-        return expect(binaryVersion).to.equal('3.4.5')
+      .getBinaryPkgAsync(customBinaryDir)
+      .then((result) => {
+        return expect(result).to.deep.equal({ version: '3.4.5' })
       })
     })
   })
@@ -88,7 +99,7 @@ describe('lib/tasks/state', function () {
         '.cache/Cypress/1.2.3/Cypress.app/Contents/MacOS/Cypress'
 
       expect(state.getPathToExecutable(state.getBinaryDir())).to.equal(
-        macExecutable
+        macExecutable,
       )
     })
 
@@ -97,7 +108,7 @@ describe('lib/tasks/state', function () {
       const linuxExecutable = '.cache/Cypress/1.2.3/Cypress/Cypress'
 
       expect(state.getPathToExecutable(state.getBinaryDir())).to.equal(
-        linuxExecutable
+        linuxExecutable,
       )
     })
 
@@ -110,7 +121,7 @@ describe('lib/tasks/state', function () {
       const customBinaryDir = 'home/downloads/cypress.app'
 
       expect(state.getPathToExecutable(customBinaryDir)).to.equal(
-        'home/downloads/cypress.app/Contents/MacOS/Cypress'
+        'home/downloads/cypress.app/Contents/MacOS/Cypress',
       )
     })
   })
@@ -118,7 +129,7 @@ describe('lib/tasks/state', function () {
   context('.getBinaryDir', function () {
     it('resolves path on macOS', function () {
       expect(state.getBinaryDir()).to.equal(
-        path.join(versionDir, 'Cypress.app')
+        path.join(versionDir, 'Cypress.app'),
       )
     })
 
@@ -142,7 +153,7 @@ describe('lib/tasks/state', function () {
 
     it('resolves path to binary/installation from version', function () {
       expect(state.getBinaryDir('4.5.6')).to.be.equal(
-        path.join(cacheDir, '4.5.6', 'Cypress.app')
+        path.join(cacheDir, '4.5.6', 'Cypress.app'),
       )
     })
 
@@ -221,10 +232,10 @@ describe('lib/tasks/state', function () {
         () => {
           return expect(fs.outputJsonAsync).to.be.calledWith(
             binaryStateFilename,
-            { verified: true }
+            { verified: true },
           )
         },
-        { spaces: 2 }
+        { spaces: 2 },
       )
     })
 
@@ -237,7 +248,7 @@ describe('lib/tasks/state', function () {
         return expect(fs.outputJsonAsync).to.be.calledWith(
           binaryStateFilename,
           { verified: false },
-          { spaces: 2 }
+          { spaces: 2 },
         )
       })
     })
@@ -310,7 +321,7 @@ describe('lib/tasks/state', function () {
 
       return state
       .parseRealPlatformBinaryFolderAsync(
-        '/Documents/Cypress.app/Contents/MacOS/Cypress'
+        '/Documents/Cypress.app/Contents/MacOS/Cypress',
       )
       .then((path) => {
         return expect(path).to.eql('/Documents/Cypress.app')

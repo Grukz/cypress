@@ -13,9 +13,10 @@ const R = require('ramda')
 const Promise = require('bluebird')
 const debug = require('debug')('cypress:server:cypress')
 const argsUtils = require('./util/args')
+const chalk = require('chalk')
 
-const warning = (code) => {
-  return require('./errors').warning(code)
+const warning = (code, args) => {
+  return require('./errors').warning(code, args)
 }
 
 const exit = (code = 0) => {
@@ -25,6 +26,20 @@ const exit = (code = 0) => {
   debug('about to exit with code', code)
 
   return process.exit(code)
+}
+
+const showWarningForInvalidConfig = (options) => {
+  const invalidConfigOptions = require('lodash').keys(options.config).reduce((invalid, option) => {
+    if (!require('./config').getConfigKeys().find((configKey) => configKey === option)) {
+      invalid.push(option)
+    }
+
+    return invalid
+  }, [])
+
+  if (invalidConfigOptions.length && options.invokedFromCli) {
+    return warning('INVALID_CONFIG_OPTION', invalidConfigOptions)
+  }
 }
 
 const exit0 = () => {
@@ -66,8 +81,6 @@ module.exports = {
           warning('INVOKED_BINARY_OUTSIDE_NPM_MODULE')
         }
 
-        // just run the gui code directly here
-        // and pass our options directly to main
         debug('running Electron currently')
 
         return require('./modes')(mode, options)
@@ -104,48 +117,6 @@ module.exports = {
     return require('./open_project').open(options.project, options)
   },
 
-  runServer (options) {
-    // args = {}
-    //
-    // _.defaults options, { autoOpen: true }
-    //
-    // if not options.project
-    //   throw new Error("Missing path to project:\n\nPlease pass 'npm run server -- --project /path/to/project'\n\n")
-    //
-    // if options.debug
-    //   args.debug = "--debug"
-    //
-    // ## just spawn our own index.js file again
-    // ## but put ourselves in project mode so
-    // ## we actually boot a project!
-    // _.extend(args, {
-    //   script:  "index.js"
-    //   watch:  ["--watch", "lib"]
-    //   ignore: ["--ignore", "lib/public"]
-    //   verbose: "--verbose"
-    //   exts:   ["-e", "coffee,js"]
-    //   args:   ["--", "--config", "port=2020", "--mode", "openProject", "--project", options.project]
-    // })
-    //
-    // args = _.chain(args).values().flatten().value()
-    //
-    // cp.spawn("nodemon", args, {stdio: "inherit"})
-    //
-    // ## auto open in dev mode directly to our
-    // ## default cypress web app client
-    // if options.autoOpen
-    //   _.delay ->
-    //     require("./browsers").launch("chrome", "http://localhost:2020/__", {
-    //       proxyServer: "http://localhost:2020"
-    //     })
-    //   , 2000
-    //
-    // if options.debug
-    //   cp.spawn("node-inspector", [], {stdio: "inherit"})
-    //
-    //   require("opn")("http://127.0.0.1:8080/debug?ws=127.0.0.1:8080&port=5858")
-  },
-
   start (argv = []) {
     debug('starting cypress with argv %o', argv)
 
@@ -157,6 +128,8 @@ module.exports = {
 
     try {
       options = argsUtils.toObject(argv)
+
+      showWarningForInvalidConfig(options)
     } catch (argumentsError) {
       debug('could not parse CLI arguments: %o', argv)
 
@@ -230,6 +203,11 @@ module.exports = {
         }).then(exit0)
         .catch(exitErr)
 
+      case 'info':
+        return require('./modes/info')(options)
+        .then(exit0)
+        .catch(exitErr)
+
       case 'smokeTest':
         return this.runElectron(mode, options)
         .then((pong) => {
@@ -266,7 +244,8 @@ module.exports = {
 
       case 'getKey':
         // print the key + exit
-        return require('./project').getSecretKeyByPath(options.projectRoot)
+        return require('./project-base').ProjectBase
+        .getSecretKeyByPath(options.projectRoot)
         .then((key) => {
           return console.log(key) // eslint-disable-line no-console
         }).then(exit0)
@@ -274,7 +253,8 @@ module.exports = {
 
       case 'generateKey':
         // generate + print the key + exit
-        return require('./project').generateSecretKeyByPath(options.projectRoot)
+        return require('./project-base').ProjectBase
+        .generateSecretKeyByPath(options.projectRoot)
         .then((key) => {
           return console.log(key) // eslint-disable-line no-console
         }).then(exit0)
@@ -289,15 +269,25 @@ module.exports = {
         // run headlessly and exit
         // with num of totalFailed
         return this.runElectron(mode, options)
-        .get('totalFailed')
+        .then((results) => {
+          if (results.runs) {
+            const isCanceled = results.runs.filter((run) => run.skippedSpec).length
+
+            if (isCanceled) {
+              // eslint-disable-next-line no-console
+              console.log(chalk.magenta('\n  Exiting with non-zero exit code because the run was canceled.'))
+
+              return 1
+            }
+          }
+
+          return results.totalFailed
+        })
         .then(exit)
         .catch(exitErr)
 
       case 'interactive':
         return this.runElectron(mode, options)
-
-      case 'server':
-        return this.runServer(options)
 
       case 'openProject':
         // open + start the project

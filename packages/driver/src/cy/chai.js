@@ -1,4 +1,5 @@
-// tests in driver/test/cypress/integration/commands/assertions_spec.coffee
+/* eslint-disable prefer-rest-params */
+// tests in driver/cypress/integration/commands/assertions_spec.js
 
 const _ = require('lodash')
 const $ = require('jquery')
@@ -7,7 +8,10 @@ const sinonChai = require('@cypress/sinon-chai')
 
 const $dom = require('../dom')
 const $utils = require('../cypress/utils')
+const $errUtils = require('../cypress/error_utils')
+const $stackUtils = require('../cypress/stack_utils')
 const $chaiJquery = require('../cypress/chai_jquery')
+const chaiInspect = require('./chai/inspect')
 
 // all words between single quotes
 const allPropertyWordsBetweenSingleQuotes = /('.*?')/g
@@ -40,16 +44,12 @@ chai.use((chai, u) => {
 
   $chaiJquery(chai, chaiUtils, {
     onInvalid (method, obj) {
-      const err = $utils.cypressErr(
-        $utils.errMessageByPath(
-          'chai.invalid_jquery_obj', {
-            assertion: method,
-            subject: $utils.stringifyActual(obj),
-          }
-        )
-      )
-
-      throw err
+      $errUtils.throwErrByPath('chai.invalid_jquery_obj', {
+        args: {
+          assertion: method,
+          subject: $utils.stringifyActual(obj),
+        },
+      })
     },
 
     onError (err, method, obj, negated) {
@@ -76,12 +76,36 @@ chai.use((chai, u) => {
   matchProto = chai.Assertion.prototype.match
   lengthProto = chai.Assertion.prototype.__methods.length.method
   containProto = chai.Assertion.prototype.__methods.contain.method
-  existProto = Object.getOwnPropertyDescriptor(chai.Assertion.prototype, 'exist').get;
-  ({ getMessage } = chaiUtils)
+  existProto = Object.getOwnPropertyDescriptor(chai.Assertion.prototype, 'exist').get
+  const { objDisplay } = chai.util;
+
+  ({ getMessage } = chai.util)
+  const _inspect = chai.util.inspect
+
+  const { inspect, setFormatValueHook } = chaiInspect.create(chai)
+
+  // prevent tunneling into Window objects (can throw cross-origin errors)
+  setFormatValueHook((ctx, val) => {
+    // https://github.com/cypress-io/cypress/issues/5270
+    // When name attribute exists in <iframe>,
+    // Firefox returns [object Window] but Chrome returns [object Object]
+    // So, we try throwing an error and check the error message.
+    try {
+      val && val.document
+      val && val.inspect
+    } catch (e) {
+      if (e.stack.indexOf('cross-origin') !== -1 || // chrome
+      e.message.indexOf('cross-origin') !== -1) { // firefox
+        return `[window]`
+      }
+    }
+  })
 
   // remove any single quotes between our **,
   // except escaped quotes, empty strings and number strings.
   const removeOrKeepSingleQuotesBetweenStars = (message) => {
+    // remove any single quotes between our **, preserving escaped quotes
+    // and if an empty string, put the quotes back
     return message.replace(allBetweenFourStars, (match) => {
       if (valueHasLeadingOrTrailingWhitespaces.test(match)) {
         // Above we used \s+, but below we use \s*.
@@ -123,12 +147,14 @@ chai.use((chai, u) => {
       }
 
       return memo
-    }, [])
+    }
+    , [])
   }
 
   const restoreAsserts = function () {
-    chaiUtils.getMessage = getMessage
-
+    chai.util.inspect = _inspect
+    chai.util.getMessage = getMessage
+    chai.util.objDisplay = objDisplay
     chai.Assertion.prototype.assert = assertProto
     chai.Assertion.prototype.match = matchProto
     chai.Assertion.prototype.__methods.length.method = lengthProto
@@ -137,8 +163,71 @@ chai.use((chai, u) => {
     return Object.defineProperty(chai.Assertion.prototype, 'exist', { get: existProto })
   }
 
-  const overrideChaiAsserts = function (assertFn) {
-    chai.Assertion.prototype.assert = createPatchedAssert(assertFn)
+  const overrideChaiInspect = () => {
+    return chai.util.inspect = inspect
+  }
+
+  const overrideChaiObjDisplay = () => {
+    return chai.util.objDisplay = function (obj) {
+      const str = chai.util.inspect(obj)
+      const type = Object.prototype.toString.call(obj)
+
+      if (chai.config.truncateThreshold && (str.length >= chai.config.truncateThreshold)) {
+        if (type === '[object Function]') {
+          if (!obj.name || (obj.name === '')) {
+            return '[Function]'
+          }
+
+          return `[Function: ${obj.name}]`
+        }
+
+        if (type === '[object Array]') {
+          return `[ Array(${obj.length}) ]`
+        }
+
+        if (type === '[object Object]') {
+          const keys = Object.keys(obj)
+          const kstr = keys.length > 2 ? `${keys.splice(0, 2).join(', ')}, ...` : keys.join(', ')
+
+          return `{ Object (${kstr}) }`
+        }
+
+        return str
+      }
+
+      return str
+    }
+  }
+
+  const overrideChaiAsserts = function (specWindow, state, assertFn) {
+    chai.Assertion.prototype.assert = createPatchedAssert(specWindow, state, assertFn)
+
+    const _origGetmessage = function (obj, args) {
+      const negate = chaiUtils.flag(obj, 'negate')
+      const val = chaiUtils.flag(obj, 'object')
+      const expected = args[3]
+      const actual = chaiUtils.getActual(obj, args)
+      let msg = (negate ? args[2] : args[1])
+      const flagMsg = chaiUtils.flag(obj, 'message')
+
+      if (typeof msg === 'function') {
+        msg = msg()
+      }
+
+      msg = msg || ''
+      msg = msg
+      .replace(/#\{this\}/g, () => {
+        return chaiUtils.objDisplay(val)
+      })
+      .replace(/#\{act\}/g, () => {
+        return chaiUtils.objDisplay(actual)
+      })
+      .replace(/#\{exp\}/g, () => {
+        return chaiUtils.objDisplay(expected)
+      })
+
+      return (flagMsg ? `${flagMsg}: ${msg}` : msg)
+    }
 
     chaiUtils.getMessage = function (assert, args) {
       const obj = assert._obj
@@ -149,7 +238,7 @@ chai.use((chai, u) => {
         assert._obj = $dom.stringify(obj, 'short')
       }
 
-      const msg = getMessage.call(this, assert, args)
+      const msg = _origGetmessage.call(this, assert, args)
 
       // restore the real obj if we changed it
       if (obj !== assert._obj) {
@@ -160,12 +249,12 @@ chai.use((chai, u) => {
     }
 
     chai.Assertion.overwriteMethod('match', (_super) => {
-      return (function (regExp, ...args) {
+      return (function (regExp) {
         if (_.isRegExp(regExp) || $dom.isDom(this._obj)) {
-          return _super.apply(this, [regExp, ...args])
+          return _super.apply(this, arguments)
         }
 
-        const err = $utils.cypressErr($utils.errMessageByPath('chai.match_invalid_argument', { regExp }))
+        const err = $errUtils.cypressErrByPath('chai.match_invalid_argument', { args: { regExp } })
 
         err.retry = false
         throw err
@@ -173,11 +262,11 @@ chai.use((chai, u) => {
     })
 
     const containFn1 = (_super) => {
-      return (function (text, ...args) {
+      return (function (text) {
         let obj = this._obj
 
-        if (!($dom.isJquery(obj) || $dom.isElement(obj))) {
-          return _super.apply(this, [text, ...args])
+        if (!($dom.isElement(obj))) {
+          return _super.apply(this, arguments)
         }
 
         const escText = $utils.escapeQuotes(text)
@@ -194,14 +283,14 @@ chai.use((chai, u) => {
           obj.is(selector) || !!obj.find(selector).length,
           'expected #{this} to contain #{exp}',
           'expected #{this} not to contain #{exp}',
-          text
+          text,
         )
       })
     }
 
     const containFn2 = (_super) => {
-      return (function (...args) {
-        _super.apply(this, args)
+      return (function () {
+        return _super.apply(this, arguments)
       })
     }
 
@@ -209,11 +298,11 @@ chai.use((chai, u) => {
 
     chai.Assertion.overwriteChainableMethod('length',
       (_super) => {
-        return (function (length, ...args) {
+        return (function (length) {
           let obj = this._obj
 
           if (!($dom.isJquery(obj) || $dom.isElement(obj))) {
-            return _super.apply(this, [length, ...args])
+            return _super.apply(this, arguments)
           }
 
           length = $utils.normalizeNumber(length)
@@ -236,7 +325,7 @@ chai.use((chai, u) => {
               `expected '${node}' to have a length of \#{exp} but got \#{act}`,
               `expected '${node}' to not have a length of \#{act}`,
               length,
-              obj.length
+              obj.length,
             )
           } catch (e1) {
             e1.node = node
@@ -252,30 +341,37 @@ chai.use((chai, u) => {
                 return `Not enough elements found. Found '${len1}', expected '${len2}'.`
               }
 
-              e1.displayMessage = getLongLengthMessage(obj.length, length)
+              // if the user has specified a custom message,
+              // for example: expect($subject, 'Should have length').to.have.length(1)
+              // prefer that over our message
+              const message = chaiUtils.flag(this, 'message') ? e1.message : getLongLengthMessage(obj.length, length)
+
+              $errUtils.modifyErrMsg(e1, message, () => message)
+
               throw e1
             }
 
-            const e2 = $utils.cypressErr($utils.errMessageByPath('chai.length_invalid_argument', { length }))
+            const e2 = $errUtils.cypressErrByPath('chai.length_invalid_argument', { args: { length } })
 
             e2.retry = false
             throw e2
           }
         })
       },
+
       (_super) => {
-        return (function (...args) {
-          return _super.apply(this, args)
+        return (function () {
+          return _super.apply(this, arguments)
         })
       })
 
     return chai.Assertion.overwriteProperty('exist', (_super) => {
-      return (function (...args) {
+      return (function () {
         const obj = this._obj
 
         if (!($dom.isJquery(obj) || $dom.isElement(obj))) {
           try {
-            return _super.apply(this, args)
+            return _super.apply(this, arguments)
           } catch (e) {
             e.type = 'existence'
             throw e
@@ -295,7 +391,7 @@ chai.use((chai, u) => {
               'expected \#{act} to exist in the DOM',
               'expected \#{act} not to exist in the DOM',
               node,
-              node
+              node,
             )
           } catch (e1) {
             e1.node = node
@@ -308,10 +404,13 @@ chai.use((chai, u) => {
                 return `Expected ${node} not to exist in the DOM, but it was continuously found.`
               }
 
-              return `Expected to find element: '${obj.selector}', but never found it.`
+              return `Expected to find element: \`${obj.selector}\`, but never found it.`
             }
 
-            e1.displayMessage = getLongExistsMessage(obj)
+            const newMessage = getLongExistsMessage(obj)
+
+            $errUtils.modifyErrMsg(e1, newMessage, () => newMessage)
+
             throw e1
           }
         }
@@ -319,7 +418,23 @@ chai.use((chai, u) => {
     })
   }
 
-  const createPatchedAssert = (assertFn) => {
+  const captureUserInvocationStack = (specWindow, state, ssfi) => {
+    // we need a user invocation stack with the top line being the point where
+    // the error occurred for the sake of the code frame
+    // in chrome, stack lines from another frame don't appear in the
+    // error. specWindow.Error works for our purposes because it
+    // doesn't include anything extra (chai.Assertion error doesn't work
+    // because it doesn't have lines from the spec iframe)
+    // in firefox, specWindow.Error has too many extra lines at the
+    // beginning, but chai.AssertionError helps us winnow those down
+    const chaiInvocationStack = $stackUtils.hasCrossFrameStacks(specWindow) && (new chai.AssertionError('uis', {}, ssfi)).stack
+
+    const userInvocationStack = $stackUtils.captureUserInvocationStack(specWindow.Error, chaiInvocationStack)
+
+    state('currentAssertionUserInvocationStack', userInvocationStack)
+  }
+
+  const createPatchedAssert = (specWindow, state, assertFn) => {
     return (function (...args) {
       let err
       const passed = chaiUtils.test(this, args)
@@ -341,41 +456,56 @@ chai.use((chai, u) => {
 
       assertFn(passed, message, value, actual, expected, err)
 
-      if (err) {
-        throw err
+      if (!err) return
+
+      // when assert() is used instead of expect(), we override the method itself
+      // below in `overrideAssert` and prefer the user invocation stack
+      // that we capture there
+      if (!state('assertUsed')) {
+        captureUserInvocationStack(specWindow, state, chaiUtils.flag(this, 'ssfi'))
       }
+
+      throw err
     })
   }
 
-  // only override assertions for this specific
-  // expect function instance so we do not affect
-  // the outside world
-  const overrideExpect = () => {
-    // make the assertion
+  const overrideExpect = (specWindow, state) => {
+    // only override assertions for this specific
+    // expect function instance so we do not affect
+    // the outside world
     return (val, message) => {
+      captureUserInvocationStack(specWindow, state, overrideExpect)
+
+      // make the assertion
       return new chai.Assertion(val, message)
     }
   }
 
-  const overrideAssert = function () {
+  const overrideAssert = function (specWindow, state) {
     const fn = (express, errmsg) => {
+      state('assertUsed', true)
+      captureUserInvocationStack(specWindow, state, fn)
+
       return chai.assert(express, errmsg)
     }
 
     const fns = _.functions(chai.assert)
 
     _.each(fns, (name) => {
-      return fn[name] = function (...args) {
-        return chai.assert[name].apply(this, args)
+      fn[name] = function () {
+        state('assertUsed', true)
+        captureUserInvocationStack(specWindow, state, overrideAssert)
+
+        return chai.assert[name].apply(this, arguments)
       }
     })
 
     return fn
   }
 
-  const setSpecWindowGlobals = function (specWindow, assertFn) {
-    const expect = overrideExpect()
-    const assert = overrideAssert()
+  const setSpecWindowGlobals = function (specWindow, state) {
+    const expect = overrideExpect(specWindow, state)
+    const assert = overrideAssert(specWindow, state)
 
     specWindow.chai = chai
     specWindow.expect = expect
@@ -388,14 +518,14 @@ chai.use((chai, u) => {
     }
   }
 
-  const create = function (specWindow, assertFn) {
-    // restoreOverrides()
+  const create = function (specWindow, state, assertFn) {
     restoreAsserts()
 
-    // overrideChai()
-    overrideChaiAsserts(assertFn)
+    overrideChaiInspect()
+    overrideChaiObjDisplay()
+    overrideChaiAsserts(specWindow, state, assertFn)
 
-    return setSpecWindowGlobals(specWindow)
+    return setSpecWindowGlobals(specWindow, state)
   }
 
   module.exports = {
@@ -404,8 +534,6 @@ chai.use((chai, u) => {
     removeOrKeepSingleQuotesBetweenStars,
 
     setSpecWindowGlobals,
-
-    // overrideChai: overrideChai
 
     restoreAsserts,
 

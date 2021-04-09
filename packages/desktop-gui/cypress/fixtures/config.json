@@ -6,7 +6,8 @@
     {
       "name": "chrome",
       "displayName": "Chrome",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "stable",
       "version": "78.0.3904.108",
       "path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "majorVersion": "78"
@@ -14,15 +15,17 @@
     {
       "name": "chromium",
       "displayName": "Chromium",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "stable",
       "version": "74.0.3729.0",
       "path": "/Applications/Chromium.app/Contents/MacOS/Chromium",
       "majorVersion": "74"
     },
     {
-      "name": "canary",
+      "name": "chrome",
       "displayName": "Canary",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "canary",
       "version": "80.0.3977.4",
       "path": "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
       "majorVersion": "80"
@@ -30,31 +33,35 @@
     {
       "name": "edge",
       "displayName": "Edge",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "stable",
       "version": "79.0.309.71",
       "path": "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
       "majorVersion": "79"
     },
     {
-      "name": "edgeBeta",
+      "name": "edge",
       "displayName": "Edge Beta",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "beta",
       "version": "79.0.309.71",
       "path": "/Applications/Microsoft Edge Beta.app/Contents/MacOS/Microsoft Edge Beta",
       "majorVersion": "79"
     },
     {
-      "name": "edgeCanary",
+      "name": "edge",
       "displayName": "Edge Canary",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "canary",
       "version": "79.0.309.71",
       "path": "/Applications/Microsoft Edge Canary.app/Contents/MacOS/Microsoft Edge Canary",
       "majorVersion": "79"
     },
     {
-      "name": "edgeDev",
+      "name": "edge",
       "displayName": "Edge Dev",
-      "family": "chrome",
+      "family": "chromium",
+      "channel": "dev",
       "version": "79.0.309.71",
       "path": "/Applications/Microsoft Edge Dev.app/Contents/MacOS/Microsoft Edge Dev",
       "majorVersion": "79"
@@ -62,7 +69,8 @@
     {
       "name": "electron",
       "displayName": "Electron",
-      "family": "electron",
+      "family": "chromium",
+      "channel": "stable",
       "version": "73.0.3683.121",
       "path": "",
       "majorVersion": "73",
@@ -72,21 +80,24 @@
       "name": "firefox",
       "displayName": "Firefox",
       "family": "firefox",
+      "channel": "stable",
       "version": "69.0.1",
       "path": "/Applications/Firefox/Contents/MacOS/Firefox",
       "majorVersion": "69"
     },
     {
-      "name": "firefoxDeveloperEdition",
+      "name": "firefox",
       "displayName": "Firefox Developer Edition",
+      "channel": "dev",
       "family": "firefox",
       "version": "69.0.1",
       "path": "/Applications/Firefox Developer/Contents/MacOS/Firefox Developer",
       "majorVersion": "69"
     },
     {
-      "name": "firefoxNightly",
+      "name": "firefox",
       "displayName": "Firefox Nightly",
+      "channel": "beta",
       "family": "firefox",
       "version": "69.0.1",
       "path": "/Applications/Firefox Nightly/Contents/MacOS/Firefox Nightly",
@@ -96,6 +107,7 @@
     {
       "name": "custom",
       "displayName": "Custom",
+      "channel": "dev",
       "family": "custom",
       "version": "4.3.2",
       "path": "/Applications/Custom/Contents/MacOS/Custom",
@@ -109,7 +121,7 @@
   "cypressHostUrl": "http://localhost:2020",
   "cypressEnv": "development",
   "env": {},
-  "blacklistHosts": [
+  "blockHosts": [
     "www.google-analytics.com",
     "hotjar.com"
   ],
@@ -259,7 +271,7 @@
         {
           "name": "chrome",
           "displayName": "Chrome",
-          "family": "chrome",
+          "family": "chromium",
           "version": "50.0.2661.86",
           "path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
           "majorVersion": "50"
@@ -267,22 +279,22 @@
         {
           "name": "chromium",
           "displayName": "Chromium",
-          "family": "chrome",
+          "family": "chromium",
           "version": "49.0.2609.0",
           "path": "/Users/bmann/Downloads/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
           "majorVersion": "49"
         },
         {
-          "name": "canary",
+          "name": "chrome",
           "displayName": "Canary",
-          "family": "chrome",
+          "family": "chromium",
           "version": "48.0",
           "path": "/Users/bmann/Downloads/chrome-mac/Canary.app/Contents/MacOS/Canary",
           "majorVersion": "48"
         },
         {
           "name": "electron",
-          "family": "electron",
+          "family": "chromium",
           "displayName": "Electron",
           "path": "",
           "version": "99.101.1234",
@@ -372,11 +384,15 @@
       "from": "default",
       "value": true
     },
+    "scrollBehavior": {
+      "from": "default",
+      "value": "top"
+    },
     "watchForFileChanges": {
       "from": "default",
       "value": true
     },
-    "blacklistHosts": {
+    "blockHosts": {
       "from": "config",
       "value": [
         "www.google-analytics.com",
@@ -399,6 +415,7 @@
   "viewportHeight": 660,
   "viewportWidth": 1000,
   "waitForAnimations": true,
+  "scrollBehavior": "top",
   "watchForFileChanges": true,
   "xhrRoute": "/xhrs/",
   "xhrUrl": "__cypress/xhrs/"

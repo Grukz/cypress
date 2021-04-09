@@ -30,33 +30,10 @@ const _getSelectionBoundsFromInput = function (el) {
     }
   }
 
-  return {
-    start: 0,
-    end: 0,
-  }
-}
-
-const _getSelectionRange = (doc: Document) => {
-  const sel = doc.getSelection()
-
-  // selection has at least one range (most always 1; only 0 at page load)
-  if (sel && sel.rangeCount) {
-    // get the first (usually only) range obj
-    return sel.getRangeAt(0)
-  }
-
-  return doc.createRange()
-}
-
-const _getSelectionBoundsFromContentEditable = function (el) {
-  const doc = $document.getDocumentFromElement(el)
-  const range = _getSelectionRange(doc)
-  const hostContenteditable = getHostContenteditable(range.commonAncestorContainer)
-
-  if (hostContenteditable === el) {
+  if (el.type === 'number') {
     return {
-      start: range.startOffset,
-      end: range.endOffset,
+      start: el.value.length,
+      end: el.value.length,
     }
   }
 
@@ -66,12 +43,45 @@ const _getSelectionBoundsFromContentEditable = function (el) {
   }
 }
 
+const _getSelectionBoundsFromContentEditable = (el) => {
+  const pos = {
+    start: 0,
+    end: 0,
+  }
+
+  const sel = _getSelectionByEl(el)
+
+  if (!sel.rangeCount) {
+    return pos
+  }
+
+  const range = sel.getRangeAt(0)
+  let preCaretRange = range.cloneRange()
+
+  preCaretRange.selectNodeContents(el)
+  preCaretRange.setEnd(range.endContainer, range.endOffset)
+  pos.end = preCaretRange.toString().length
+
+  preCaretRange.selectNodeContents(el)
+  preCaretRange.setEnd(range.startContainer, range.startOffset)
+
+  pos.start = preCaretRange.toString().length
+
+  return pos
+}
+
 // TODO get ACTUAL caret position in contenteditable, not line
 const _replaceSelectionContentsContentEditable = function (el, text) {
   const doc = $document.getDocumentFromElement(el)
 
   // NOTE: insertText will also handle '\n', and render newlines
-  $elements.callNativeMethod(doc, 'execCommand', 'insertText', true, text)
+  let nativeUI = true
+
+  if (Cypress.browser.family === 'firefox') {
+    nativeUI = false
+  }
+
+  $elements.callNativeMethod(doc, 'execCommand', 'insertText', nativeUI, text)
 }
 
 // Keeping around native implementation
@@ -117,23 +127,17 @@ const insertSubstring = (curText, newText, [start, end]) => {
   return curText.substring(0, start) + newText + curText.substring(end)
 }
 
-const _hasContenteditableAttr = (el) => {
-  const attr = $elements.tryCallNativeMethod(el, 'getAttribute', 'contenteditable')
-
-  return attr !== undefined && attr !== null && attr !== 'false'
-}
-
-const getHostContenteditable = function (el) {
+const getHostContenteditable = function (el: HTMLElement) {
   let curEl = el
 
-  while (curEl.parentElement && !_hasContenteditableAttr(curEl)) {
+  while (curEl.parentElement && !$elements.hasContenteditableAttr(curEl)) {
     curEl = curEl.parentElement
   }
 
-  // if there's no host contenteditable, we must be in designmode
-  // so act as if the body element is the host contenteditable
-  if (!_hasContenteditableAttr(curEl)) {
-    return el.ownerDocument.body
+  // if there's no host contenteditable, we must be in designMode
+  // so act as if the documentElement (html element) is the host contenteditable
+  if (!$elements.hasContenteditableAttr(curEl)) {
+    return $document.getDocumentFromElement(el).documentElement
   }
 
   return curEl
@@ -264,7 +268,7 @@ const deleteLeftOfCursor = function (el) {
         'modify',
         'extend',
         'backward',
-        'character'
+        'character',
       )
     }
 
@@ -340,15 +344,7 @@ const moveCursorRight = function (el) {
   }
 }
 
-const moveCursorUp = (el) => {
-  return _moveCursorUpOrDown(el, true)
-}
-
-const moveCursorDown = (el) => {
-  return _moveCursorUpOrDown(el, false)
-}
-
-const _moveCursorUpOrDown = function (el, up) {
+const _moveCursorUpOrDown = function (up: boolean, el: HTMLElement) {
   if ($elements.isInput(el)) {
     // on an input, instead of moving the cursor
     // we want to perform the native browser action
@@ -370,8 +366,43 @@ const _moveCursorUpOrDown = function (el, up) {
 
   const isTextarea = $elements.isTextarea(el)
 
+  if (isTextarea && Cypress.browser.family === 'firefox') {
+    const val = $elements.getNativeProp(el as HTMLTextAreaElement, 'value')
+    const bounds = _getSelectionBoundsFromTextarea(el as HTMLTextAreaElement)
+    let toPos
+
+    if (up) {
+      const partial = val.slice(0, bounds.start)
+      const lastEOL = partial.lastIndexOf('\n')
+      const offset = partial.length - lastEOL - 1
+      const SOL = partial.slice(0, lastEOL).lastIndexOf('\n') + 1
+      const toLineLen = partial.slice(SOL, lastEOL).length
+
+      toPos = SOL + Math.min(toLineLen, offset)
+
+      // const baseLen = arr.slice(0, -2).join().length - 1
+      // toPos = baseLen + arr.slice(-1)[0].length
+    } else {
+      const partial = val.slice(bounds.end)
+      const arr = partial.split('\n')
+      const baseLen = arr.slice(0, 1).join('\n').length + bounds.end
+
+      toPos = baseLen + (bounds.end - val.slice(0, bounds.end).lastIndexOf('\n'))
+    }
+
+    setSelectionRange(el, toPos, toPos)
+
+    return
+  }
+
   if (isTextarea || $elements.isContentEditable(el)) {
     const selection = _getSelectionByEl(el)
+
+    if (Cypress.browser.family === 'firefox' && !selection.isCollapsed) {
+      up ? selection.collapseToStart() : selection.collapseToEnd()
+
+      return
+    }
 
     return $elements.callNativeMethod(selection, 'modify',
       'move',
@@ -380,15 +411,10 @@ const _moveCursorUpOrDown = function (el, up) {
   }
 }
 
-const moveCursorToLineStart = (el) => {
-  return _moveCursorToLineStartOrEnd(el, true)
-}
+const moveCursorUp = _.curry(_moveCursorUpOrDown)(true)
+const moveCursorDown = _.curry(_moveCursorUpOrDown)(false)
 
-const moveCursorToLineEnd = (el) => {
-  return _moveCursorToLineStartOrEnd(el, false)
-}
-
-const _moveCursorToLineStartOrEnd = function (el: HTMLElement, toStart) {
+const _moveCursorToLineStartOrEnd = function (toStart: boolean, el: HTMLElement) {
   const isInput = $elements.isInput(el)
   const isTextarea = $elements.isTextarea(el)
   const isInputOrTextArea = isInput || isTextarea
@@ -396,11 +422,54 @@ const _moveCursorToLineStartOrEnd = function (el: HTMLElement, toStart) {
   if ($elements.isContentEditable(el) || isInputOrTextArea) {
     const selection = _getSelectionByEl(el)
 
+    if (Cypress.browser.family === 'firefox' && isInputOrTextArea) {
+      if (isInput) {
+        let toPos = 0
+
+        if (!toStart) {
+          toPos = $elements.getNativeProp(el as HTMLInputElement, 'value').length
+        }
+
+        setSelectionRange(el, toPos, toPos)
+
+        return
+      }
+      // const doc = $document.getDocumentFromElement(el)
+      // console.log(doc.activeElement)
+      // $elements.callNativeMethod(doc, 'execCommand', 'selectall', false)
+      // $elements.callNativeMethod(el, 'select')
+      // _getSelectionByEl(el).ca
+      // toStart ? _getSelectionByEl(el).collapseToStart : _getSelectionByEl(el).collapseToEnd()
+
+      if (isTextarea) {
+        const bounds = _getSelectionBoundsFromTextarea(el)
+        const value = $elements.getNativeProp(el as HTMLTextAreaElement, 'value')
+        let toPos: number
+
+        if (toStart) {
+          toPos = value.slice(0, bounds.start).lastIndexOf('\n') + 1
+        } else {
+          const valSlice = value.slice(bounds.end)
+          const EOLNewline = valSlice.indexOf('\n')
+          const EOL = EOLNewline === -1 ? valSlice.length : EOLNewline
+
+          toPos = bounds.end + EOL
+        }
+
+        setSelectionRange(el, toPos, toPos)
+
+        return
+      }
+    }
+
     // the selection.modify API is non-standard, may work differently in other browsers, and is not in IE11.
     // https://developer.mozilla.org/en-US/docs/Web/API/Selection/modify
     return $elements.callNativeMethod(selection, 'modify', 'move', toStart ? 'backward' : 'forward', 'lineboundary')
   }
 }
+
+const moveCursorToLineStart = _.curry(_moveCursorToLineStartOrEnd)(true)
+const moveCursorToLineEnd = _.curry(_moveCursorToLineStartOrEnd)(false)
 
 const isCollapsed = function (el) {
   if ($elements.isTextarea(el) || $elements.isInput(el)) {
@@ -488,23 +557,63 @@ const _moveSelectionTo = function (toStart: boolean, el: HTMLElement, options = 
   }
 
   if ($elements.isContentEditable(el)) {
-    $elements.callNativeMethod(doc, 'execCommand', 'selectAll', false, null)
-    const selection = doc.getSelection()
+    const selection = _getSelectionByEl(el)
 
     if (!selection) {
       return
     }
 
-    // collapsing the range doesn't work on input/textareas, since the range contains more than the input element
-    // However, IE can always* set selection range, so only modern browsers (with the selection API) will need this
-    const direction = toStart ? 'backward' : 'forward'
+    // We need to check if element is the root contenteditable element or elements inside it
+    // because they should be handled differently.
+    if ($elements.hasContenteditableAttr(el)) {
+      if (Cypress.isBrowser({ family: 'firefox' })) {
+        // FireFox doesn't treat a selectAll+arrow the same as clicking the start/end of a contenteditable
+        // so we need to select the specific nodes inside the contenteditable.
+        let elToSelect = el.childNodes[toStart ? 0 : el.childNodes.length - 1]
 
-    selection.modify('move', direction, 'line')
+        // in firefox, when an empty contenteditable is a single <br> element or <div><br/></div>
+        // its innerText will be '\n' (maybe find a more efficient measure)
+        if (!elToSelect || el.innerText === '\n') {
+          // we must be in an empty contenteditable, so we're already at both the start and end
+          return
+        }
 
-    return
+        // if we're on a <br> but the text isn't empty, we need to
+        if ($elements.getTagName(elToSelect) === 'br') {
+          if (el.childNodes.length < 2) {
+            // no other node to target, shouldn't really happen but we should behave like the contenteditable is empty
+            return
+          }
+
+          elToSelect = toStart ? el.childNodes[1] : el.childNodes[el.childNodes.length - 2]
+        }
+
+        const range = selection.getRangeAt(0)
+
+        range.selectNodeContents(elToSelect)
+      } else {
+        $elements.callNativeMethod(doc, 'execCommand', 'selectAll', false, null)
+      }
+    } else {
+      let range
+
+      // Sometimes, selection.rangeCount is 0 when there is no selection.
+      // In that case, it fails in Chrome.
+      // We're creating a new range and add it to the selection to avoid the case.
+      if (selection.rangeCount === 0) {
+        range = doc.createRange()
+        selection.addRange(range)
+      } else {
+        range = selection.getRangeAt(0)
+      }
+
+      range.selectNodeContents(el)
+    }
+
+    toStart ? selection.collapseToStart() : selection.collapseToEnd()
   }
 
-  return false
+  return
 }
 
 const moveSelectionToEnd = _.curry(_moveSelectionTo)(false)

@@ -7,53 +7,55 @@ const errors = require('../errors')
 const check = require('check-more-types')
 
 // returns true if the passed string is a known browser family name
-const isBrowserFamily = check.oneOf(['electron', 'chrome'])
+const isBrowserFamily = check.oneOf(['chromium', 'firefox'])
 
 let instance = null
 
-const kill = function (unbind) {
-  // cleanup our running browser
-  // instance
+const kill = function (unbind, isProcessExit) {
+  // Clean up the instance when the browser is closed
   if (!instance) {
+    debug('browsers.kill called with no active instance')
+
     return Promise.resolve()
   }
 
-  return new Promise((resolve) => {
-    if (unbind) {
-      instance.removeAllListeners()
-    }
+  const _instance = instance
 
-    instance.once('exit', function (...args) {
+  instance = null
+
+  if (unbind) {
+    _instance.removeAllListeners()
+  }
+
+  return new Promise((resolve) => {
+    _instance.once('exit', () => {
       debug('browser process killed')
 
-      return resolve.apply(null, args)
+      resolve()
     })
 
     debug('killing browser process')
 
-    instance.kill()
-
-    return cleanup()
+    _instance.kill(isProcessExit)
   })
 }
 
-const cleanup = () => {
-  return instance = null
-}
-
-const getBrowserLauncherByFamily = function (family) {
-  debug('getBrowserLauncherByFamily %o', { family })
-  if (!isBrowserFamily(family)) {
-    debug('unknown browser family', family)
+const getBrowserLauncher = function (browser) {
+  debug('getBrowserLauncher %o', { browser })
+  if (!isBrowserFamily(browser.family)) {
+    debug('unknown browser family', browser.family)
   }
 
-  switch (family) {
-    case 'electron':
-      return require('./electron')
-    case 'chrome':
-      return require('./chrome')
-    default:
-      break
+  if (browser.name === 'electron') {
+    return require('./electron')
+  }
+
+  if (browser.family === 'chromium') {
+    return require('./chrome')
+  }
+
+  if (browser.family === 'firefox') {
+    return require('./firefox')
   }
 }
 
@@ -61,19 +63,37 @@ const isValidPathToBrowser = (str) => {
   return path.basename(str) !== str
 }
 
+const parseBrowserOption = (opt) => {
+  // it's a name or a path
+  if (!_.isString(opt) || !opt.includes(':')) {
+    return {
+      name: opt,
+      channel: 'stable',
+    }
+  }
+
+  // it's in name:channel format
+  const split = opt.indexOf(':')
+
+  return {
+    name: opt.slice(0, split),
+    channel: opt.slice(split + 1),
+  }
+}
+
 const ensureAndGetByNameOrPath = function (nameOrPath, returnAll = false, browsers = null) {
   const findBrowsers = Array.isArray(browsers) ? Promise.resolve(browsers) : utils.getBrowsers()
 
   return findBrowsers
   .then((browsers = []) => {
-    let browser
+    const filter = parseBrowserOption(nameOrPath)
 
-    debug('searching for browser %o', { nameOrPath, knownBrowsers: browsers })
+    debug('searching for browser %o', { nameOrPath, filter, knownBrowsers: browsers })
 
     // try to find the browser by name with the highest version property
     const sortedBrowsers = _.sortBy(browsers, ['version'])
 
-    browser = _.findLast(sortedBrowsers, { name: nameOrPath })
+    const browser = _.findLast(sortedBrowsers, filter)
 
     if (browser) {
       // short circuit if found
@@ -104,13 +124,23 @@ const ensureAndGetByNameOrPath = function (nameOrPath, returnAll = false, browse
   })
 }
 
+const formatBrowsersToOptions = (browsers) => {
+  return browsers.map((browser) => {
+    if (browser.channel !== 'stable') {
+      return [browser.name, browser.channel].join(':')
+    }
+
+    return browser.name
+  })
+}
+
 const throwBrowserNotFound = function (browserName, browsers = []) {
-  const names = _.map(browsers, 'name').join(', ')
+  const names = `- ${formatBrowsersToOptions(browsers).join('\n- ')}`
 
   return errors.throw('BROWSER_NOT_FOUND_BY_NAME', browserName, names)
 }
 
-process.once('exit', kill)
+process.once('exit', () => kill(true, true))
 
 module.exports = {
   ensureAndGetByNameOrPath,
@@ -120,8 +150,6 @@ module.exports = {
   removeOldProfiles: utils.removeOldProfiles,
 
   get: utils.getBrowsers,
-
-  launch: utils.launch,
 
   close: kill,
 
@@ -155,7 +183,7 @@ module.exports = {
         onBrowserClose () {},
       })
 
-      if (!(browserLauncher = getBrowserLauncherByFamily(browser.family))) {
+      if (!(browserLauncher = getBrowserLauncher(browser))) {
         return throwBrowserNotFound(browser.name, options.browsers)
       }
 
@@ -180,8 +208,7 @@ module.exports = {
         // enable the browser to configure the interface
         instance.once('exit', () => {
           options.onBrowserClose()
-
-          return cleanup()
+          instance = null
         })
 
         // TODO: instead of waiting an arbitrary

@@ -5,7 +5,7 @@ import PropTypes from 'prop-types'
 import React, { Component } from 'react'
 import { findDOMNode } from 'react-dom'
 import { Reporter } from '@packages/reporter'
-import $Cypress from '@packages/driver'
+import { $ } from '@packages/driver'
 
 import errorMessages from '../errors/error-messages'
 import util from '../lib/util'
@@ -15,15 +15,19 @@ import Header from '../header/header'
 import Iframes from '../iframe/iframes'
 import Message from '../message/message'
 import Resizer from './resizer'
-
-const $ = $Cypress.$
+import StudioModals from '../studio/studio-modals'
 
 @observer
 class App extends Component {
   @observable isReporterResizing = false
 
   render () {
-    const specPath = this.props.util.absoluteSpecPath(this.props.config)
+    /**
+     * @type {Cypress.Cypress['spec']}
+     */
+    const spec = this.props.config.spec
+
+    const NO_COMMAND_LOG = this.props.config.env && this.props.config.env.NO_COMMAND_LOG
 
     return (
       <div className={cs({
@@ -35,12 +39,14 @@ class App extends Component {
           className='reporter-wrap'
           style={{ width: this.props.state.reporterWidth }}
         >
-          <Reporter
+          {Boolean(NO_COMMAND_LOG) || <Reporter
             runner={this.props.eventManager.reporterBus}
-            specPath={specPath}
+            spec={spec}
             autoScrollingEnabled={this.props.config.state.autoScrollingEnabled}
-            error={errorMessages.reporterError(this.props.state.scriptError, specPath)}
-          />
+            error={errorMessages.reporterError(this.props.state.scriptError, spec.relative)}
+            firefoxGcInterval={this.props.config.firefoxGcInterval}
+            experimentalStudioEnabled={this.props.config.experimentalStudio}
+          />}
         </div>
         <div
           ref='container'
@@ -59,6 +65,7 @@ class App extends Component {
           onResize={this._onReporterResize}
           onResizeEnd={this._onReporterResizeEnd}
         />
+        <StudioModals />
         {/* these pixels help ensure the browser has painted when taking a screenshot */}
         <div ref='screenshotHelperPixels' className='screenshot-helper-pixels'>
           <div /><div /><div /><div /><div /><div />
@@ -155,6 +162,8 @@ class App extends Component {
       iframesSizeNode.style.marginLeft = 0
 
       containerNode.style.left = 0
+      iframesNode.style.left = 0
+
       containerNode.className += ' screenshotting'
 
       if (!config.scale) {
@@ -175,6 +184,7 @@ class App extends Component {
 
       containerNode.className = containerNode.className.replace(' screenshotting', '')
       containerNode.style.left = prevAttrs.left
+      iframesNode.style.left = prevAttrs.left
 
       iframesNode.style.top = prevAttrs.top
       iframesNode.style.backgroundColor = null
@@ -221,7 +231,10 @@ App.propTypes = {
   config: PropTypes.shape({
     browsers: PropTypes.arrayOf(PropTypes.shape({
       name: PropTypes.string.isRequired,
-      majorVersion: PropTypes.string.isRequired,
+      majorVersion: PropTypes.oneOfType([
+        PropTypes.string,
+        PropTypes.number,
+      ]),
       version: PropTypes.string.isRequired,
     })).isRequired,
     integrationFolder: PropTypes.string.isRequired,

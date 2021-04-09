@@ -44,24 +44,20 @@ describe('Project Nav', function () {
     })
 
     it('displays projects nav', function () {
-      cy.get('.empty').should('not.be.visible')
+      cy.get('.empty').should('not.exist')
 
       cy.get('.navbar-default')
     })
 
-    it('displays \'Tests\' nav as active', () => {
+    it('displays "Tests" nav as active', () => {
       cy.get('.navbar-default').contains('a', 'Tests')
       .should('have.class', 'active')
     })
 
-    describe('when project loads', function () {
-      beforeEach(() => {
-        cy.wait(600)
-      })
-
-      it('displays \'Tests\' page', () => {
-        cy.contains('integration')
-      })
+    it('displays "Tests" page when project loads', () => {
+      cy.contains('integration')
+      cy.get('.list-as-table').should('be.visible')
+      cy.percySnapshot()
     })
 
     describe('runs page', function () {
@@ -148,7 +144,7 @@ describe('Project Nav', function () {
           })
         })
 
-        it('shows info icon with tooltip for browsder with info', function () {
+        it('shows info icon with tooltip for browser with info', function () {
           const browserWithInfo = _.find(this.config.browsers, (b) => !!b.info)
 
           cy.get('.browsers-list .dropdown-chosen').click()
@@ -156,6 +152,8 @@ describe('Project Nav', function () {
 
           cy.get('.cy-tooltip')
           .should('contain', browserWithInfo.info)
+
+          cy.percySnapshot()
         })
 
         it('does not display stop button', () => {
@@ -207,7 +205,7 @@ describe('Project Nav', function () {
         })
 
         it('saves chosen browser in local storage', () => {
-          expect(localStorage.getItem('chosenBrowser')).to.eq('chromium')
+          expect(localStorage.getItem('chosenBrowser')).to.eq(JSON.stringify({ name: 'chromium', channel: 'stable' }))
         })
       })
 
@@ -219,11 +217,15 @@ describe('Project Nav', function () {
         it('displays browser icon as spinner', () => {
           cy.get('.browsers-list .dropdown-chosen').find('i')
           .should('have.class', 'fas fa-sync-alt fa-spin')
+
+          cy.percySnapshot()
         })
 
         it('disables browser dropdown', () => {
           cy.get('.browsers-list .dropdown-chosen')
           .should('have.class', 'disabled')
+
+          cy.percySnapshot()
         })
       })
 
@@ -246,17 +248,18 @@ describe('Project Nav', function () {
 
         it('displays stop browser button', () => {
           cy.get('.close-browser').should('be.visible')
+          cy.percySnapshot()
         })
 
         it('sends the required parameters to launch a browser', function () {
           const browserArg = this.ipc.launchBrowser.getCall(0).args[0].browser
 
           expect(browserArg).to.have.keys([
-            'family', 'name', 'path', 'version', 'majorVersion', 'displayName', 'info', 'isChosen', 'custom', 'warning',
+            'family', 'name', 'path', 'profilePath', 'version', 'majorVersion', 'displayName', 'info', 'isChosen', 'custom', 'warning', 'channel',
           ])
 
           expect(browserArg.path).to.include('/')
-          expect(browserArg.family).to.equal('chrome')
+          expect(browserArg.family).to.equal('chromium')
         })
 
         describe('stop browser', function () {
@@ -291,7 +294,7 @@ describe('Project Nav', function () {
           })
 
           it('hides close browser button', () => {
-            cy.get('.close-browser').should('not.be.visible')
+            cy.get('.close-browser').should('not.exist')
           })
 
           it('re-enables browser dropdown', () => {
@@ -309,25 +312,42 @@ describe('Project Nav', function () {
     })
 
     describe('local storage saved browser', function () {
-      beforeEach(function () {
-        localStorage.setItem('chosenBrowser', 'chromium')
-
-        this.openProject.resolve(this.config)
-      })
-
       afterEach(() => {
         cy.clearLocalStorage()
       })
 
-      it('displays local storage browser name in chosen', () => {
+      it('displays chosen browser in localStorage', function () {
+        // deliberately not the default 'chrome' browser
+        // @see https://github.com/cypress-io/cypress/issues/8281
+        localStorage.setItem('chosenBrowser', JSON.stringify({
+          name: 'chrome',
+          channel: 'canary',
+        }))
+
+        this.openProject.resolve(this.config)
+
         cy.get('.browsers-list .dropdown-chosen')
-        .should('contain', 'Chromium')
+        .should('contain', 'Canary').and('not.contain', 'Edge')
+        .get('.dropdown-chosen .browser-icon')
+        .should('have.attr', 'src').and('include', './img/chrome-canary')
       })
 
-      it('displays local storage browser icon in chosen', () => {
-        cy.get('.browsers-list .dropdown-chosen .browser-icon')
-        .should('have.attr', 'src')
-        .and('include', './img/chromium')
+      it('displays chosen browser with old string-style id in localStorage', function () {
+        localStorage.setItem('chosenBrowser', 'chrome')
+
+        this.openProject.resolve(this.config)
+
+        cy.get('.browsers-list .dropdown-chosen')
+        .should('contain', 'Chrome')
+      })
+
+      it('displays default browser with null localStorage', function () {
+        localStorage.removeItem('chosenBrowser')
+
+        this.openProject.resolve(this.config)
+
+        cy.get('.browsers-list .dropdown-chosen')
+        .should('contain', this.config.browsers[0].displayName)
       })
     })
 
@@ -360,7 +380,9 @@ describe('Project Nav', function () {
 
       it('displays no dropdown btn', () => {
         cy.get('.browsers-list')
-        .find('.dropdown-toggle').should('not.be.visible')
+        .find('.dropdown-toggle').should('not.exist')
+
+        cy.percySnapshot()
       })
     })
 
@@ -370,7 +392,7 @@ describe('Project Nav', function () {
           {
             'name': 'chromium',
             'displayName': 'Chromium',
-            'family': 'chrome',
+            'family': 'chromium',
             'version': '49.0.2609.0',
             'path': '/Users/bmann/Downloads/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
             'majorVersion': '49',
@@ -388,6 +410,8 @@ describe('Project Nav', function () {
         cy.get('.cy-tooltip a').click().then(function () {
           expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/bad-browser-policy')
         })
+
+        cy.percySnapshot()
       })
     })
 
@@ -412,6 +436,34 @@ describe('Project Nav', function () {
         localStorage.setItem('chosenBrowser', 'Custom')
         cy.get('.browsers-list .dropdown-chosen')
         .should('contain', 'Custom')
+
+        cy.wrap(localStorage.getItem('chosenBrowser')).should('equal', 'Custom')
+      })
+    })
+
+    describe('browser with info', function () {
+      beforeEach(function () {
+        this.info = 'foo info bar [baz](http://example.com/)'
+        this.config.browsers = [{
+          name: 'electron',
+          family: 'electron',
+          displayName: 'Electron',
+          version: '50.0.2661.86',
+          path: '',
+          majorVersion: '50',
+          info: this.info,
+        }]
+
+        this.openProject.resolve(this.config)
+      })
+
+      it('shows info icon with linkified tooltip', function () {
+        cy.get('.browsers .fa-info-circle').trigger('mouseover')
+
+        cy.get('.cy-tooltip').should('contain', 'foo info bar baz')
+        cy.get('.cy-tooltip a').should('have.text', 'baz').click().then(function () {
+          expect(this.ipc.externalOpen).to.be.calledWith('http://example.com/')
+        })
       })
     })
   })
@@ -424,6 +476,7 @@ describe('Project Nav', function () {
     it('main nav does not block project nav when long project name pushes it to multiple lines', () => {
       cy.viewport(400, 400)
       cy.get('.project-nav').should('be.visible')
+      cy.percySnapshot()
     })
   })
 })

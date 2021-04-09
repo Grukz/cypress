@@ -2,7 +2,7 @@ const ciProvider = require('../../../lib/util/ci_provider')
 const { commitInfo } = require('@cypress/commit-info')
 const pkg = require('../../../../../package.json')
 const Promise = require('bluebird')
-const rp = require('request-promise')
+const rp = require('@cypress/request-promise')
 const debug = require('debug')('cypress:performance')
 const R = require('ramda')
 
@@ -30,7 +30,6 @@ function track (type, data) {
       type,
       data: {
         'package.json Version': pkg.version,
-        'Next Version': process.env.NEXT_DEV_VERSION,
         'Commit SHA': sha,
         'Commit Branch': branch,
         'Commit Author': author,
@@ -57,7 +56,6 @@ function track (type, data) {
     })
   })
   .catch((err) => {
-    /* eslint-disable no-console */
     console.error('Track error for type %s %s', type, err.message)
   })
 }

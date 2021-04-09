@@ -5,7 +5,7 @@ const path = require('path')
 const debug = require('debug')('cypress:server:file')
 const Promise = require('bluebird')
 const lockFile = Promise.promisifyAll(require('lockfile'))
-const fs = require('./fs')
+const { fs } = require('./fs')
 const env = require('./env')
 const exit = require('./exit')
 const { default: pQueue } = require('p-queue')
@@ -205,7 +205,7 @@ class File {
       return lockFile.lockAsync(this._lockFilePath, { wait: LOCK_TIMEOUT })
     })
     .finally(() => {
-      return debug('gettin lock succeeded or failed for %s', this.path)
+      return debug('getting lock succeeded or failed for %s', this.path)
     })
   }
 

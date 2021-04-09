@@ -6,15 +6,14 @@ const $Snapshots = require('../cy/snapshots')
 const $Events = require('./events')
 const $dom = require('../dom')
 const $utils = require('./utils')
+const $errUtils = require('./error_utils')
 
 // adds class methods for command, route, and agent logging
 // including the intermediate $Log interface
-const CypressErrorRe = /(AssertionError|CypressError)/
 const groupsOrTableRe = /^(groups|table)$/
 const parentOrChildRe = /parent|child/
-const ERROR_PROPS = 'message type name stack fileName lineNumber columnNumber host uncaught actual expected showDiff'.split(' ')
 const SNAPSHOT_PROPS = 'id snapshots $el url coords highlightAttr scrollBy viewportWidth viewportHeight'.split(' ')
-const DISPLAY_PROPS = 'id alias aliasType callCount displayName end err event functionName hookName instrument isStubbed message method name numElements numResponses referencesAlias renderProps state testId type url visible'.split(' ')
+const DISPLAY_PROPS = 'id alias aliasType callCount displayName end err event functionName hookId instrument isStubbed message method name numElements numResponses referencesAlias renderProps state testId timeout type url visible wallClockStartedAt testCurrentRetry'.split(' ')
 const BLACKLIST_PROPS = 'snapshots'.split(' ')
 
 let delay = null
@@ -91,10 +90,12 @@ const countLogsByTests = function (tests = {}) {
 
   return _
   .chain(tests)
-  .map((test, key) => {
-    return [].concat(test.agents, test.routes, test.commands)
-  }).flatten()
-  .compact()
+  .flatMap((test) => {
+    return [test, test.prevAttempts]
+  })
+  .flatMap((tests) => {
+    return [].concat(tests.agents, tests.routes, tests.commands)
+  }).compact()
   .union([{ id: 0 }])
   .map('id')
   .max()
@@ -134,6 +135,7 @@ const defaults = function (state, config, obj) {
     }
 
     _.defaults(obj, {
+      timeout: config('defaultCommandTimeout'),
       event: false,
       renderProps () {
         return {}
@@ -167,19 +169,32 @@ const defaults = function (state, config, obj) {
 
   const runnable = state('runnable')
 
+  const getTestAttemptFromRunnable = (runnable) => {
+    if (!runnable) {
+      return
+    }
+
+    const t = $utils.getTestFromRunnable(runnable)
+
+    return t._currentRetry || 0
+  }
+
   return _.defaults(obj, {
     id: (counter += 1),
     state: 'pending',
     instrument: 'command',
     url: state('url'),
-    hookName: state('hookName'),
+    hookId: state('hookId'),
     testId: runnable ? runnable.id : undefined,
+    testCurrentRetry: getTestAttemptFromRunnable(state('runnable')),
     viewportWidth: state('viewportWidth'),
     viewportHeight: state('viewportHeight'),
     referencesAlias: undefined,
     alias: undefined,
     aliasType: undefined,
     message: undefined,
+    timeout: undefined,
+    wallClockStartedAt: new Date().toJSON(),
     renderProps () {
       return {}
     },
@@ -224,29 +239,13 @@ const Log = function (cy, state, config, obj) {
       return invoke() || {}
     },
 
-    serializeError () {
-      let err = this.get('error')
-
-      if (err) {
-        return _.reduce(ERROR_PROPS, (memo, prop) => {
-          if (_.has(err, prop) || err[prop]) {
-            memo[prop] = err[prop]
-          }
-
-          return memo
-        }, {})
-      }
-
-      return null
-    },
-
     toJSON () {
       return _
       .chain(attributes)
       .omit('error')
       .omitBy(_.isFunction)
       .extend({
-        err: this.serializeError(),
+        err: $errUtils.wrapErr(this.get('error')),
         consoleProps: this.invoke('consoleProps'),
         renderProps: this.invoke('renderProps'),
       })
@@ -376,13 +375,7 @@ const Log = function (cy, state, config, obj) {
     },
 
     getError (err) {
-      // dont log stack traces on cypress errors
-      // or assertion errors
-      if (CypressErrorRe.test(err.name)) {
-        return err.toString()
-      }
-
-      return err.stack
+      return err.stack || err.message
     },
 
     setElAttrs () {
@@ -538,7 +531,7 @@ const create = function (Cypress, cy, state, config) {
 
   const logFn = function (options = {}) {
     if (!_.isObject(options)) {
-      $utils.throwErrByPath('log.invalid_argument', { args: { arg: options } })
+      $errUtils.throwErrByPath('log.invalid_argument', { args: { arg: options } })
     }
 
     const log = Log(cy, state, config, options)
@@ -610,8 +603,6 @@ const create = function (Cypress, cy, state, config) {
 }
 
 module.exports = {
-  CypressErrorRe,
-
   reduceMemory,
 
   toSerializedJSON,

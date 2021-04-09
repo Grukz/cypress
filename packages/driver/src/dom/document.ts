@@ -1,15 +1,18 @@
 const $jquery = require('./jquery')
 
 const docNode = window.Node.DOCUMENT_NODE
+const docFragmentNode = window.Node.DOCUMENT_FRAGMENT_NODE
 
 //TODO: make this not allow jquery
-const isDocument = (obj: HTMLElement | Document): obj is Document => {
+const isDocument = (obj: Node | JQuery): obj is Document => {
   try {
+    let node = obj as Node
+
     if ($jquery.isJquery(obj)) {
-      obj = obj[0]
+      node = obj[0]
     }
 
-    return Boolean(obj && obj.nodeType === docNode)
+    return node?.nodeType === docNode || node?.nodeType === docFragmentNode
   } catch (error) {
     return false
   }
@@ -17,10 +20,16 @@ const isDocument = (obj: HTMLElement | Document): obj is Document => {
 
 // does this document have a currently active window (defaultView)
 const hasActiveWindow = (doc) => {
+  // in firefox, detached documents still have a reference to their window
+  // but document.location is null
+  if (Cypress.isBrowser('firefox') && !doc.location) {
+    return false
+  }
+
   return !!doc.defaultView
 }
 
-const getDocumentFromElement = (el: HTMLElement): Document => {
+const getDocumentFromElement = (el: Node): Document => {
   if (isDocument(el)) {
     return el
   }

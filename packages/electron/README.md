@@ -4,19 +4,18 @@ This is the lib responsible for installing + building Electron. This enables us 
 
 It does this by using `symlinks` while in development.
 
-## Installing
-
-The Desktop GUI's dependencies can be installed with:
-
-```bash
-cd packages/desktop-gui
-npm install
-```
-
 ## Building
 
 ```bash
-npm run build
+yarn workspace @packages/electron build
 ```
 
-Note: `npm run build` just installs Electron binary for your OS specific platform
+Note: this just installs Electron binary for your OS specific platform
+
+## Testing
+
+```bash
+yarn workspace @packages/electron test
+yarn workspace @packages/electron test-debug
+yarn workspace @packages/electron test-watch
+```

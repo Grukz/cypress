@@ -63,14 +63,23 @@ const addProject = (path) => {
   .return(project)
 }
 
-const runSpec = (project, spec, browser) => {
+// TODO: refactor to take options object
+const runSpec = (project, spec, browser, specFilter) => {
   specsStore.setChosenSpec(spec)
   project.setChosenBrowser(browser)
 
   const launchBrowser = () => {
     project.browserOpening()
 
-    ipc.launchBrowser({ browser, spec: spec.file }, (err, data = {}) => {
+    const launchOptions = {
+      browser,
+      spec: spec.file,
+      specType: spec.specType,
+      relative: spec.relative,
+      specFilter,
+    }
+
+    ipc.launchBrowser(launchOptions, (err, data = {}) => {
       if (err) {
         return project.setError(err)
       }
@@ -120,7 +129,7 @@ const closeProject = (project) => {
 
   return Promise.join(
     closeBrowser(project),
-    ipc.closeProject()
+    ipc.closeProject(),
   )
 }
 
@@ -195,12 +204,16 @@ const openProject = (project) => {
 
 const reopenProject = (project) => {
   project.clearError()
-  project.clearWarning()
+  project.dismissWarning()
 
   return closeProject(project)
   .then(() => {
     return openProject(project)
   })
+}
+
+const pingBaseUrl = (url) => {
+  return ipc.pingBaseUrl(url)
 }
 
 const removeProject = (project) => {
@@ -234,4 +247,5 @@ export default {
   runSpec,
   closeBrowser,
   getRecordKeys,
+  pingBaseUrl,
 }

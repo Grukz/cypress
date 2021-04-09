@@ -4,7 +4,7 @@ import appState, { AppState } from './app-state'
 import runnablesStore, { RunnablesStore, RootRunnable, LogProps } from '../runnables/runnables-store'
 import statsStore, { StatsStore, StatsStoreStartInfo } from '../header/stats-store'
 import scroller, { Scroller } from './scroller'
-import TestModel, { TestProps, UpdateTestCallback } from '../test/test-model'
+import TestModel, { UpdatableTestProps, UpdateTestCallback, TestProps } from '../test/test-model'
 
 const localBus = new EventEmitter()
 
@@ -34,7 +34,9 @@ export interface Events {
 
 interface StartInfo extends StatsStoreStartInfo {
   autoScrollingEnabled: boolean
+  firefoxGcInterval: number
   scrollTop: number
+  studioActive: boolean
 }
 
 type CollectRunStateCallback = (arg: {
@@ -70,6 +72,10 @@ const events: Events = {
       runnablesStore.updateLog(log)
     }))
 
+    runner.on('reporter:log:remove', action('log:remove', (log: LogProps) => {
+      runnablesStore.removeLog(log)
+    }))
+
     runner.on('reporter:restart:test:run', action('restart:test:run', () => {
       appState.reset()
       runnablesStore.reset()
@@ -85,23 +91,27 @@ const events: Events = {
 
     runner.on('reporter:start', action('start', (startInfo: StartInfo) => {
       appState.temporarilySetAutoScrolling(startInfo.autoScrollingEnabled)
+      appState.setFirefoxGcInterval(startInfo.firefoxGcInterval)
       runnablesStore.setInitialScrollTop(startInfo.scrollTop)
+      appState.setStudioActive(startInfo.studioActive)
       if (runnablesStore.hasTests) {
         statsStore.start(startInfo)
       }
     }))
 
-    runner.on('test:before:run:async', action('test:before:run:async', (runnable: TestModel) => {
+    runner.on('test:before:run:async', action('test:before:run:async', (runnable: TestProps) => {
       runnablesStore.runnableStarted(runnable)
     }))
 
-    runner.on('test:after:run', action('test:after:run', (runnable: TestModel) => {
+    runner.on('test:after:run', action('test:after:run', (runnable: TestProps) => {
       runnablesStore.runnableFinished(runnable)
-      statsStore.incrementCount(runnable.state)
+      if (runnable.final && !appState.studioActive) {
+        statsStore.incrementCount(runnable.state!)
+      }
     }))
 
-    runner.on('test:set:state', action('test:set:state', (runnable: TestProps, cb: UpdateTestCallback) => {
-      runnablesStore.updateTest(runnable, cb)
+    runner.on('test:set:state', action('test:set:state', (props: UpdatableTestProps, cb: UpdateTestCallback) => {
+      runnablesStore.updateTest(props, cb)
     }))
 
     runner.on('paused', action('paused', (nextCommandName: string) => {
@@ -123,6 +133,16 @@ const events: Events = {
 
     runner.on('reporter:snapshot:unpinned', action('snapshot:unpinned', () => {
       appState.pinnedSnapshotId = null
+    }))
+
+    runner.on('before:firefox:force:gc', action('before:firefox:force:gc', ({ gcInterval }) => {
+      appState.setForcingGc(true)
+      appState.setFirefoxGcInterval(gcInterval)
+    }))
+
+    runner.on('after:firefox:force:gc', action('after:firefox:force:gc', ({ gcInterval }) => {
+      appState.setForcingGc(false)
+      appState.setFirefoxGcInterval(gcInterval)
     }))
 
     localBus.on('resume', action('resume', () => {
@@ -148,18 +168,13 @@ const events: Events = {
       runner.emit('runner:console:log', commandId)
     })
 
-    localBus.on('show:error', (testId: number) => {
-      const test = runnablesStore.testById(testId)
+    localBus.on('show:error', (test: TestModel) => {
+      const command = test.err.isCommandErr ? test.commandMatchingErr() : null
 
-      if (test.err.isCommandErr) {
-        const command = test.commandMatchingErr()
-
-        if (!command) return
-
-        runner.emit('runner:console:log', command.id)
-      } else {
-        runner.emit('runner:console:error', testId)
-      }
+      runner.emit('runner:console:error', {
+        err: test.err,
+        commandId: command?.id,
+      })
     })
 
     localBus.on('show:snapshot', (commandId) => {
@@ -182,6 +197,14 @@ const events: Events = {
       runner.emit('focus:tests')
     })
 
+    localBus.on('get:user:editor', (cb) => {
+      runner.emit('get:user:editor', cb)
+    })
+
+    localBus.on('set:user:editor', (editor) => {
+      runner.emit('set:user:editor', editor)
+    })
+
     localBus.on('save:state', () => {
       runner.emit('save:state', {
         autoScrollingEnabled: appState.autoScrollingEnabled,
@@ -190,6 +213,30 @@ const events: Events = {
 
     localBus.on('external:open', (url) => {
       runner.emit('external:open', url)
+    })
+
+    localBus.on('open:file', (fileDetails) => {
+      runner.emit('open:file', fileDetails)
+    })
+
+    localBus.on('studio:init:test', (testId) => {
+      runner.emit('studio:init:test', testId)
+    })
+
+    localBus.on('studio:init:suite', (suiteId) => {
+      runner.emit('studio:init:suite', suiteId)
+    })
+
+    localBus.on('studio:remove:command', (commandId) => {
+      runner.emit('studio:remove:command', commandId)
+    })
+
+    localBus.on('studio:cancel', () => {
+      runner.emit('studio:cancel')
+    })
+
+    localBus.on('studio:save', () => {
+      runner.emit('studio:save')
     })
   },
 

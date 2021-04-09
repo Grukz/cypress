@@ -8,14 +8,7 @@ The runner is the minimal "chrome" around the user's app and has the following r
 - Managing the viewport size and scale
 - Showing the currently active URL
 
-## Installing
-
-The runner's dependencies can be installed with:
-
-```bash
-cd packages/runner
-npm install
-```
+This package also includes the majority of the code that gets injected into the App Under Test (AUT) by `packages/proxy`. That bundle's entry point is `injection/index.js`.
 
 ## Developing
 
@@ -29,7 +22,7 @@ This watches and compiles all changes as you make them.
 - Additionally it compiles both the [`reporter`](../reporter) and [`driver`](../driver)
 
 ```bash
-npm run watch
+yarn workspace @packages/runner watch
 ```
 
 ## Building
@@ -37,17 +30,31 @@ npm run watch
 ### For development
 
 ```bash
-npm run build
+yarn workspace @packages/runner build
 ```
 
 ### For production
 
 ```bash
-npm run build-prod
+yarn workspace @packages/runner build-prod
 ```
 
 ## Testing
 
+### Node Unit Tests
+
 ```bash
-npm test
+yarn workspace @packages/runner test
+```
+
+### Cypress Tests
+
+You can run Cypress tests found in [`cypress/integration`](./cypress/integration):
+```bash
+yarn workspace @packages/runner cypress:open
+```
+
+To watch and reload changes to the runner while testing you'll want to run:
+```bash
+yarn workspace @packages/runner watch
 ```

@@ -1,37 +1,32 @@
 # Extension
 
-This is the Chrome Extension responsible for automating Chrome
-
-## Installing
-
-The extension's dependencies can be installed with:
-
-```bash
-cd packages/extension
-npm install
-```
+This is the WebExtension responsible for automating the browser
 
 ## Developing
 
 ### Watching
 
 ```bash
-npm run watch
+yarn workspace @packages/extension watch
 ```
 
 ## Building
 
 ```bash
-npm run build
+yarn workspace @packages/extension build
 ```
 
 ## Testing
 
 ```bash
-npm run test
+yarn workspace @packages/extension test
+yarn workspace @packages/extension test-watch
+yarn workspace @packages/extension test-debug
 ```
 
 ## Debugging
+
+### In Chrome
 
 1. Open Chrome
 2. Go into Extensions
@@ -40,3 +35,7 @@ npm run test
 5. Choose **packages/extension/dist** directory
 6. Click **background page** to debug `background.js`
 7. Click **Reload (⌘R)** to pull in changes to `manifest.json`
+
+### In Firefox
+
+To be written...
