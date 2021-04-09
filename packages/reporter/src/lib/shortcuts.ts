@@ -1,6 +1,7 @@
 // @ts-ignore
-import { dom } from '@packages/driver'
+import dom from '@packages/driver/src/dom'
 import events from './events'
+import appState from './app-state'
 
 class Shortcuts {
   start () {
@@ -13,12 +14,13 @@ class Shortcuts {
 
   _handleKeyDownEvent (event: KeyboardEvent) {
     // if typing into an input, textarea, etc, don't trigger any shortcuts
+    // @ts-ignore
     if (dom.isTextLike(event.target)) return
 
     switch (event.key) {
-      case 'r': events.emit('restart')
+      case 'r': !appState.studioActive && events.emit('restart')
         break
-      case 's': events.emit('stop')
+      case 's': !appState.isPaused && !appState.studioActive && events.emit('stop')
         break
       case 'f': events.emit('focus:tests')
         break

@@ -11,26 +11,25 @@ declare module '@cypress/get-windows-proxy' {
 }
 
 declare module 'http' {
-  import { Socket } from 'net'
-  import { Url } from 'url'
+import { Socket } from 'net'
+import { Url } from 'url'
 
-  type SocketCallback = (err: Optional<Error>, sock: Optional<Socket>) => void
+    type SocketCallback = (err: Optional<Error>, sock: Optional<Socket>) => void
 
   interface Agent {
     addRequest(req: ClientRequest, options: RequestOptions): void
     createSocket(req: ClientRequest, options: RequestOptions, cb: SocketCallback): void
     createConnection(options: RequestOptions, cb: Optional<SocketCallback>): void
     protocol: 'http:' | 'https:' | string
-    freeSockets: {
-      [key: string]: Socket[]
-    }
   }
 
   interface ClientRequest {
-    _header: { [key: string]: string }
+    _header?: { [key: string]: string }
     _implicitHeader: () => void
     output: string[]
     agent: Agent
+    insecureHTTPParser: boolean
+    maxHeaderSize?: number
   }
 
   interface RequestOptions extends ClientRequestArgs {
@@ -44,6 +43,10 @@ declare module 'http' {
     uri: Url
   }
 
+  interface OutgoingMessage {
+    destroy(error?: Error): void
+  }
+
   export const CRLF: string
 }
 
@@ -51,6 +54,10 @@ declare module 'https' {
   interface Agent {
     _sessionCache: { [_agentKey: string]: Buffer }
   }
+}
+
+declare interface InternalStream {
+  queue(str: string | null): void
 }
 
 declare module 'net' {
@@ -94,8 +101,4 @@ declare module 'url' {
   interface UrlWithStringQuery {
     format(): string
   }
-}
-
-declare interface InternalStream {
-  queue(str: string | null): void
 }

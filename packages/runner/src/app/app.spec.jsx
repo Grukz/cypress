@@ -1,6 +1,7 @@
 import React from 'react'
 import { shallow } from 'enzyme'
 import sinon from 'sinon'
+import driver from '@packages/driver'
 
 import * as reporter from '@packages/reporter'
 import Message from '../message/message'
@@ -19,6 +20,11 @@ const createProps = () => ({
     viewportHeight: 800,
     viewportWidth: 500,
     state: {},
+    spec: {
+      name: 'foo.js',
+      relative: 'relative/path/to/foo.js',
+      absolute: '/absolute/path/to/foo.js',
+    },
   },
   eventManager: {
     notifyRunningSpec: sinon.spy(),
@@ -29,9 +35,6 @@ const createProps = () => ({
     },
   },
   state: new State(),
-  util: {
-    absoluteSpecPath: sinon.stub().returns('/path/to/int/some-spec.js'),
-  },
 })
 
 const shallowRender = (component) => {
@@ -39,6 +42,14 @@ const shallowRender = (component) => {
 }
 
 describe('<App />', () => {
+  beforeEach(() => {
+    driver.$.returns({
+      outerHeight () {
+        return 10
+      },
+    })
+  })
+
   it('renders the reporter wrap with the reporter width', () => {
     const props = createProps()
 
@@ -61,7 +72,7 @@ describe('<App />', () => {
     props.config.integrationFolder = 'path/to/int'
     const component = shallowRender(<App {...props} />)
 
-    expect(component.find(Reporter)).to.have.prop('specPath', '/path/to/int/some-spec.js')
+    expect(component.find(Reporter)).to.have.prop('spec').deep.eq(props.config.spec)
   })
 
   it('renders the <Reporter /> with the autoScrollingEnabled flag', () => {
@@ -71,6 +82,15 @@ describe('<App />', () => {
     const component = shallowRender(<App {...props} />)
 
     expect(component.find(Reporter)).to.have.prop('autoScrollingEnabled', true)
+  })
+
+  it('renders the <Reporter /> with the firefoxGcInterval flag', () => {
+    const props = createProps()
+
+    props.config.firefoxGcInterval = 111
+    const component = shallowRender(<App {...props} />)
+
+    expect(component.find(Reporter)).to.have.prop('firefoxGcInterval', 111)
   })
 
   it('renders the runner container with `left` set as the width of the reporter', () => {
@@ -104,7 +124,7 @@ describe('<App />', () => {
     const component = shallowRender(
       <App {...createProps()}>
         <div className='some-child' />
-      </App>
+      </App>,
     )
 
     expect(component.find('.some-child')).to.exist

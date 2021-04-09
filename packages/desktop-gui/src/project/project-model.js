@@ -1,6 +1,8 @@
 import _ from 'lodash'
-import { computed, observable, action } from 'mobx'
+import { action, computed, observable, toJS } from 'mobx'
+
 import Browser from '../lib/browser-model'
+import Warning from './warning-model'
 
 const cacheProps = [
   'id',
@@ -56,7 +58,8 @@ export default class Project {
   @observable browserState = 'closed'
   @observable resolvedConfig
   @observable error
-  @observable warnings = []
+  /** @type {{[key: string] : {warning:Error & {dismissed: boolean}}}} */
+  @observable _warnings = {}
   @observable apiError
   @observable parentTestsFolderDisplay
   @observable integrationExampleName
@@ -122,6 +125,10 @@ export default class Project {
     return this.browsers[0]
   }
 
+  @computed get warnings () {
+    return _.reject(this._warnings, { isDismissed: true })
+  }
+
   @action update (props) {
     if (!props) return
 
@@ -173,8 +180,10 @@ export default class Project {
         return this.setChosenBrowser(customBrowser, { save: false })
       }
 
-      if (localStorage.getItem('chosenBrowser')) {
-        return this.setChosenBrowserByName(localStorage.getItem('chosenBrowser'))
+      const ls = localStorage.getItem('chosenBrowser')
+
+      if (ls) {
+        return this.setChosenBrowserFromLocalStorage(ls)
       }
 
       return this.setChosenBrowser(this.defaultBrowser)
@@ -187,7 +196,7 @@ export default class Project {
     })
 
     if (save !== false) {
-      localStorage.setItem('chosenBrowser', browser.name)
+      localStorage.setItem('chosenBrowser', JSON.stringify(_.pick(browser, 'name', 'channel')))
     }
 
     browser.isChosen = true
@@ -208,6 +217,9 @@ export default class Project {
   }
 
   @action setError (err = {}) {
+    // for some reason, the original `stack` is unavailable on `err` once it is set on the model
+    // `stack2` remains usable though, for some reason
+    err.stack2 = err.stack
     this.error = err
   }
 
@@ -216,40 +228,53 @@ export default class Project {
   }
 
   @action addWarning (warning) {
-    if (!this.dismissedWarnings[this._serializeWarning(warning)]) {
-      this.warnings.push(warning)
+    const type = warning.type
+
+    if (type && this._warnings[type] && this._warnings[type].isDismissed) {
+      return
     }
+
+    this._warnings[type] = new Warning(warning)
   }
 
-  @action clearWarning (warning) {
+  @action dismissWarning (warning) {
     if (!warning) {
       // calling with no warning clears all warnings
-      return this.warnings.map((warning) => {
-        return this.clearWarning(warning)
-      })
+      return _.each(this._warnings, ((warning) => {
+        return this.dismissWarning(warning)
+      }))
     }
 
-    this.dismissedWarnings[this._serializeWarning(warning)] = true
-
-    this.warnings = _.without(this.warnings, warning)
-  }
-
-  _serializeWarning (warning) {
-    return `${warning.type}:${warning.name}:${warning.message}`
+    warning.setDismissed(true)
   }
 
   @action setApiError = (err = {}) => {
     this.apiError = err
   }
 
-  @action setChosenBrowserByName (name) {
-    const browser = _.find(this.browsers, { name }) || this.defaultBrowser
+  @action setChosenBrowserFromLocalStorage (ls) {
+    let filter = {}
+
+    try {
+      _.merge(filter, JSON.parse(ls))
+    } catch (err) {
+      // localStorage pre-dates JSON filter, assume "name"
+      filter.name = ls
+    }
+
+    const browser = _.find(this.browsers, filter) || this.defaultBrowser
 
     this.setChosenBrowser(browser)
   }
 
   clientDetails () {
     return _.pick(this, 'id', 'path')
+  }
+
+  getConfigValue (key) {
+    if (!this.resolvedConfig) return
+
+    return toJS(this.resolvedConfig[key]).value
   }
 
   serialize () {

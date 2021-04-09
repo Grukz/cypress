@@ -52,6 +52,8 @@ describe('Error Message', function () {
 
     cy.get('.error')
     .should('contain', this.err.message)
+
+    cy.percySnapshot()
   })
 
   it('displays error message with html escaped', function () {
@@ -82,17 +84,16 @@ describe('Error Message', function () {
     .and('contain', 'To fix')
   })
 
-  it('word wraps long error message plus update bar', function () {
+  it('word wraps long error message', function () {
     this.updaterCheck.resolve('1.3.4')
     this.longErrMessage = 'Morbileorisus,portaacconsecteturac,vestibulumateros.Nullamquisrisusegeturnamollis ornare vel eu leo. Donec sed odio dui. Nullam quis risus eget urna mollis ornare vel eu leo. Etiam porta sem malesuada magna mollis euismod. Maecenas faucibus mollis interdum. Nullam id dolor id nibh ultricies vehicula ut id elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam id dolor id nibh ultricies vehicula ut id elit. Vestibulum id ligula porta felis euismod semper. Vestibulum id ligula porta felis euismod semper.Praesent commodo cursus magna, vel scelerisque nisl consectetur et. Nullam id dolor id nibh ultricies vehicula ut id elit. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Duis mollis, est non commodo luctus, nisi erat porttitor ligula, eget lacinia odio sem nec elit. Donec id elit non mi porta gravida at eget metus. Morbi leo risus, porta ac consectetur ac, vestibulum at eros. Cras justo odio, dapibus ac facilisis in, egestas eget quam.Duis mollis, est non commodo luctus, nisi erat porttitor ligula, eget lacinia odio sem nec elit. Morbi leo risus, porta ac consectetur ac, vestibulum at eros. Praesent commodo cursus magna, vel scelerisque nisl consectetur et. Morbi leo risus, porta ac consectetur ac, vestibulum at eros. Maecenas faucibus mollis interdum. Etiam porta sem malesuada magna mollis euismod.'
     this.ipc.openProject.rejects({ name: 'Error', message: this.longErrMessage, stack: '[object Object]↵' })
     this.start()
 
-    cy.get('.updates-available').should('be.visible')
-    .contains('New updates are available')
-
     cy.get('.error')
     .and('contain', this.longErrMessage)
+
+    cy.percySnapshot()
   })
 
   it('re-opens project on click of \'Try again\' button', function () {
@@ -128,17 +129,42 @@ describe('Error Message', function () {
     this.start()
 
     cy.get('.error').contains('ReferenceError: alsdkjf is not defined')
-    cy.get('details').should('not.have.attr', 'open')
-    cy.get('details').click().should('have.attr', 'open')
-    cy.get('summary').should('contain', 'ReferenceError')
+    cy.get('details.details-body').should('not.have.attr', 'open')
+    cy.get('details.details-body').click().should('have.attr', 'open')
+    cy.get('details.details-body > summary').should('contain', 'ReferenceError')
   })
 
   it('doesn\'t show error details if not provided', function () {
     cy.stub(this.ipc, 'onProjectError').yields(null, this.err)
     this.start()
 
+    cy.get('details.details-body > summary').should('not.exist')
+  })
+
+  it('shows error stack trace if provided', function () {
+    const err = new Error('foo')
+
+    err.stack = 'bar'
+
+    cy.stub(this.ipc, 'onProjectError').yields(null, err)
+    this.start()
+
+    cy.get('.error').contains('foo')
+    cy.get('details.stacktrace').should('not.have.attr', 'open')
+    cy.get('details.stacktrace').click().should('have.attr', 'open')
+    cy.get('details.stacktrace').should('contain', 'bar')
+    cy.percySnapshot()
+  })
+
+  it('doesn\'t show error stack trace if not provided', function () {
+    const err = new Error()
+
+    delete err.stack
+    cy.stub(this.ipc, 'onProjectError').yields(null, err)
+    this.start()
+
     cy.get('.error')
-    cy.get('summary').should('not.exist')
+    cy.get('details.stacktrace > summary').should('not.exist')
   })
 
   it('shows abbreviated error details if only one line', function () {
@@ -155,7 +181,7 @@ describe('Error Message', function () {
     this.start()
 
     cy.get('.error').contains('ReferenceError: alsdkjf is not defined')
-    cy.get('summary').should('not.exist')
+    cy.get('details.details-body > summary').should('not.exist')
   })
 
   it('opens links outside of electron', function () {
@@ -197,7 +223,7 @@ describe('Error Message', function () {
     this.ipc.openProject.rejects(this.detailsErr)
     this.start()
 
-    cy.get('details').click()
+    cy.get('details.details-body').click()
     cy.get('nav').should('be.visible')
     cy.get('footer').should('be.visible')
   })
@@ -207,7 +233,7 @@ describe('Error Message', function () {
     this.ipc.openProject.rejects(this.detailsErr)
     this.start()
 
-    cy.get('details').click()
+    cy.get('details.details-body').click()
     cy.contains('Try Again').should('be.visible')
     cy.get('.full-alert pre').should('have.css', 'overflow', 'auto')
   })

@@ -25,13 +25,13 @@ describe('Navigation', function () {
 
   it('displays and opens link to docs on click', () => {
     cy.get('nav').find('.fa-graduation-cap').click().then(function () {
-      expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io')
+      expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/docs' })
     })
   })
 
   it('displays and opens link to support on click', () => {
     cy.get('nav').find('.fa-question-circle').click().then(function () {
-      expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/support')
+      expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/support' })
     })
   })
 
@@ -61,7 +61,7 @@ describe('Navigation', function () {
     })
 
     it('displays user name', () => {
-      cy.get('nav a').should(function ($a) {
+      cy.get('.user-dropdown .dropdown-chosen').should(function ($a) {
         expect($a).to.contain(this.user.name)
       })
     })
@@ -70,6 +70,7 @@ describe('Navigation', function () {
       cy.contains('Jane Lane').click()
 
       cy.contains('Log Out').should('be.visible')
+      cy.percySnapshot()
     })
 
     describe('logging out', function () {
@@ -95,6 +96,7 @@ describe('Navigation', function () {
 
       it('shows global error', () => {
         cy.get('.global-error').should('be.visible')
+        cy.percySnapshot()
       })
 
       it('displays error message', function () {
@@ -121,7 +123,7 @@ describe('Navigation', function () {
     })
 
     it('displays email instead of name', () => {
-      cy.get('nav a').should(function ($a) {
+      cy.get('.user-dropdown .dropdown-chosen').should(function ($a) {
         expect($a).to.contain(this.user.email)
       })
     })

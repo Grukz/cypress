@@ -1,4 +1,4 @@
-const e2e = require('../support/helpers/e2e')
+const e2e = require('../support/helpers/e2e').default
 
 // https://github.com/cypress-io/cypress/issues/4313
 context('cy.visit performance tests', function () {
@@ -27,26 +27,19 @@ context('cy.visit performance tests', function () {
     return stdout.replace(/^\d+%\s+of visits to [^\s]+ finished in less than.*$/gm, 'histogram line')
   }
 
-  context('pass', function () {
-    [
-      'chrome',
-      'electron',
-    ].forEach((browser) => {
-      it(`in ${browser}`, function () {
-        return e2e.exec(this, {
-          spec: 'fast_visit_spec.coffee',
-          snapshot: true,
-          expectedExitCode: 0,
-          config: {
-            video: false,
-            env: {
-              currentRetry: this.test._currentRetry,
-            },
+  e2e.it('passes', {
+    onStdout,
+    spec: 'fast_visit_spec.js',
+    snapshot: true,
+    onRun (exec, browser, ctx) {
+      return exec({
+        config: {
+          video: false,
+          env: {
+            currentRetry: ctx.test._currentRetry,
           },
-          browser,
-          onStdout,
-        })
+        },
       })
-    })
+    },
   })
 })

@@ -4,9 +4,28 @@ const _ = require('lodash')
 const Jimp = require('jimp')
 const path = require('path')
 const Promise = require('bluebird')
-const performance = require('../../../../test/support/helpers/performance')
+const { useFixedBrowserLaunchSize } = require('../../../utils')
 
-module.exports = (on) => {
+/**
+ * @type {Cypress.PluginConfig}
+ */
+module.exports = (on, config) => {
+  if (config.testingType !== 'e2e') {
+    throw Error(`This is an e2e testing project. testingType should be 'e2e'. Received ${config.testingType}`)
+  }
+
+  let performance = {
+    track: () => Promise.resolve(),
+  }
+
+  // TODO: fix this - in open mode, this will throw an error
+  // since the relative path is different in open vs run mode
+  try {
+    performance = require('../../../../test/support/helpers/performance')
+  } catch (err) {
+    console.error(err)
+  }
+
   // save some time by only reading the originals once
   let cache = {}
 
@@ -31,10 +50,27 @@ module.exports = (on) => {
     screenshotsTaken.push(details)
   })
 
-  on('before:browser:launch', (browser, args) => {
-    browserArgs = args
+  on('before:browser:launch', (browser, options) => {
+    useFixedBrowserLaunchSize(browser, options, config)
 
-    return args
+    if (browser.family === 'firefox' && process.env.FIREFOX_FORCE_STRICT_SAMESITE) {
+      // @see https://www.jardinesoftware.net/2019/10/28/samesite-by-default-in-2020/
+      // this option will eventually become default, but for now, it seems to have inconsistent
+      // behavior in the extension vs regular web browsing - default in webextension is still
+      // "no_restriction"
+      // options.preferences['network.cookie.sameSite.laxByDefault'] = true
+      options.preferences['network.cookie.sameSite.noneRequiresSecure'] = true
+    }
+
+    if (browser.family === 'chromium' && browser.name !== 'electron') {
+      if (process.env.CHROMIUM_EXTRA_LAUNCH_ARGS) {
+        options.args = options.args.concat(process.env.CHROMIUM_EXTRA_LAUNCH_ARGS.split(' '))
+      }
+    }
+
+    browserArgs = options.args
+
+    return options
   })
 
   on('task', {
@@ -42,6 +78,11 @@ module.exports = (on) => {
 
     'errors' (message) {
       throw new Error(message)
+    },
+
+    'plugins:crash' (message) {
+      console.log('\nPURPOSEFULLY CRASHING THE PLUGIN PROCESS FROM TEST')
+      process.exit(1)
     },
 
     'ensure:pixel:color' ({ name, colors, devicePixelRatio }) {
@@ -117,7 +158,6 @@ module.exports = (on) => {
 
     'record:fast_visit_spec' ({ percentiles, url, browser, currentRetry }) {
       percentiles.forEach(([percent, percentile]) => {
-        // eslint-disable-next-line no-console
         console.log(`${percent}%\t of visits to ${url} finished in less than ${percentile}ms`)
       })
 
@@ -142,6 +182,10 @@ module.exports = (on) => {
 
     'get:browser:args' () {
       return browserArgs
+    },
+
+    'get:config:value' (key) {
+      return config[key]
     },
   })
 }

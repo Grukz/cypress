@@ -1,4 +1,3 @@
-const os = require('os')
 const chalk = require('chalk')
 const { stripIndent, stripIndents } = require('common-tags')
 const { merge } = require('ramda')
@@ -10,13 +9,36 @@ const state = require('./tasks/state')
 
 const docsUrl = 'https://on.cypress.io'
 const requiredDependenciesUrl = `${docsUrl}/required-dependencies`
+const runDocumentationUrl = `${docsUrl}/cypress-run`
 
 // TODO it would be nice if all error objects could be enforced via types
 // to only have description + solution properties
 
 const hr = '----------'
 
+const genericErrorSolution = stripIndent`
+  Search for an existing issue or open a GitHub issue at
+
+    ${chalk.blue(util.issuesUrl)}
+`
+
 // common errors Cypress application can encounter
+const unknownError = {
+  description: 'Unknown Cypress CLI error',
+  solution: genericErrorSolution,
+}
+
+const invalidRunProjectPath = {
+  description: 'Invalid --project path',
+  solution: stripIndent`
+    Please provide a valid project path.
+
+    Learn more about ${chalk.cyan('cypress run')} at:
+
+      ${chalk.blue(runDocumentationUrl)}
+  `,
+}
+
 const failedDownload = {
   description: 'The Cypress App could not be downloaded.',
   solution: stripIndent`
@@ -27,17 +49,13 @@ const failedDownload = {
 
 const failedUnzip = {
   description: 'The Cypress App could not be unzipped.',
-  solution: stripIndent`
-    Search for an existing issue or open a GitHub issue at
-
-      ${chalk.blue(util.issuesUrl)}
-  `,
+  solution: genericErrorSolution,
 }
 
 const missingApp = (binaryDir) => {
   return {
     description: `No version of Cypress is installed in: ${chalk.cyan(
-      binaryDir
+      binaryDir,
     )}`,
     solution: stripIndent`
     \nPlease reinstall Cypress by running: ${chalk.cyan('cypress install')}
@@ -55,6 +73,8 @@ const binaryNotExecutable = (executable) => {
     - the cypress npm package as 'root' or with 'sudo'
 
     Please check that you have the appropriate user permissions.
+
+    You can also try clearing the cache with 'cypress cache clear' and reinstalling. 
   `,
   }
 }
@@ -192,8 +212,8 @@ const unexpected = {
 
 const invalidCypressEnv = {
   description:
-    chalk.red('The environment variable with the reserved name "CYPRESS_ENV" is set.'),
-  solution: chalk.red('Unset the "CYPRESS_ENV" environment variable and run Cypress again.'),
+    chalk.red('The environment variable with the reserved name "CYPRESS_INTERNAL_ENV" is set.'),
+  solution: chalk.red('Unset the "CYPRESS_INTERNAL_ENV" environment variable and run Cypress again.'),
   exitCode: 11,
 }
 
@@ -211,29 +231,6 @@ const childProcessKilled = (eventName, signal) => {
   }
 }
 
-const removed = {
-  CYPRESS_BINARY_VERSION: {
-    description: stripIndent`
-    The environment variable CYPRESS_BINARY_VERSION has been renamed to CYPRESS_INSTALL_BINARY as of version ${chalk.green(
-    '3.0.0'
-  )}
-    `,
-    solution: stripIndent`
-    You should set CYPRESS_INSTALL_BINARY instead.
-    `,
-  },
-  CYPRESS_SKIP_BINARY_INSTALL: {
-    description: stripIndent`
-    The environment variable CYPRESS_SKIP_BINARY_INSTALL has been removed as of version ${chalk.green(
-    '3.0.0'
-  )}
-    `,
-    solution: stripIndent`
-      To skip the binary install, set CYPRESS_INSTALL_BINARY=0
-    `,
-  },
-}
-
 const CYPRESS_RUN_BINARY = {
   notValid: (value) => {
     const properFormat = `**/${state.getPlatformExecutable()}`
@@ -245,17 +242,8 @@ const CYPRESS_RUN_BINARY = {
   },
 }
 
-function getPlatformInfo () {
-  return util.getOsVersionAsync().then((version) => {
-    return stripIndent`
-    Platform: ${os.platform()} (${version})
-    Cypress Version: ${util.pkgVersion()}
-  `
-  })
-}
-
 function addPlatformInformation (info) {
-  return getPlatformInfo().then((platform) => {
+  return util.getPlatformInfo().then((platform) => {
     return merge(info, { platform })
   })
 }
@@ -297,7 +285,7 @@ function formErrorText (info, msg, prevMessage) {
     la(
       is.unemptyString(obj.description),
       'expected error description to be text',
-      obj.description
+      obj.description,
     )
 
     // assuming that if there the solution is a function it will handle
@@ -317,7 +305,7 @@ function formErrorText (info, msg, prevMessage) {
       la(
         is.unemptyString(obj.solution),
         'expected error solution to be text',
-        obj.solution
+        obj.solution,
       )
 
       add(`
@@ -400,6 +388,7 @@ module.exports = {
   getError,
   hr,
   errors: {
+    unknownError,
     nonZeroExitCodeXvfb,
     missingXvfb,
     missingApp,
@@ -413,10 +402,10 @@ module.exports = {
     failedUnzip,
     invalidCypressEnv,
     invalidCacheDirectory,
-    removed,
     CYPRESS_RUN_BINARY,
     smokeTestFailure,
     childProcessKilled,
     incompatibleHeadlessFlags,
+    invalidRunProjectPath,
   },
 }

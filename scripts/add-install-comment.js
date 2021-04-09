@@ -1,8 +1,6 @@
 // this build utility script posts on the commit in the default branch "develop"
 // telling the user how they can install pre-release build of the Test Runner
 
-require('@packages/coffee/register')
-
 const la = require('lazy-ass')
 const is = require('check-more-types')
 const os = require('os')
@@ -42,38 +40,19 @@ console.log(' arch:', arch)
 const ciName = getCIName() || 'Unknown CI'
 const buildUrl = getCIBuildUrl()
 const ciBuildLink = buildUrl ? `[${ciName} has built](${buildUrl})` : `${ciName} has built`
-const instructionsAt =
-  'https://on.cypress.io/installing-cypress#Install-pre-release-version'
-const preamble = stripIndent`
-  ${ciBuildLink} the \`${platform} ${arch}\` version of the Test Runner.
-
-  You can install this pre-release platform-specific build using instructions at [${instructionsAt}](${instructionsAt}).
-
-  You will need to use custom \`CYPRESS_INSTALL_BINARY\` url and install Cypress using an url instead of the version.
-`
-
-const getLinuxInstallMessage = () => {
-  return stripIndent`
-    ${preamble}
-
-    export CYPRESS_INSTALL_BINARY=${binary}
-    npm install ${npm}
-  `
-}
-
-const getWindowsInstallMessage = () => {
-  return stripIndent`
-    ${preamble}
-
-    set CYPRESS_INSTALL_BINARY=${binary}
-    npm install ${binary}
-  `
-}
 
 const getInstallMessage = () => {
-  return platform === 'win32'
-    ? getWindowsInstallMessage()
-    : getLinuxInstallMessage()
+  return stripIndent`
+    ${ciBuildLink} the \`${platform} ${arch}\` version of the Test Runner.
+
+    Learn more about this pre-release platform-specific build at https://on.cypress.io/installing-cypress#Install-pre-release-version.
+
+    Run this command to install the pre-release locally:
+
+    \`\`\`
+    npm install ${npm}
+    \`\`\`
+  `
 }
 
 addCommitComment({

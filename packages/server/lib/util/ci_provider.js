@@ -30,6 +30,12 @@ const isAzureCi = () => {
   return process.env.TF_BUILD && process.env.AZURE_HTTP_USER_AGENT
 }
 
+const isAWSCodeBuild = () => {
+  return _.some(process.env, (val, key) => {
+    return /^CODEBUILD_/.test(key)
+  })
+}
+
 const isBamboo = () => {
   return process.env.bamboo_buildNumber
 }
@@ -82,6 +88,7 @@ const isWercker = () => {
 const CI_PROVIDERS = {
   'appveyor': 'APPVEYOR',
   'azure': isAzureCi,
+  'awsCodeBuild': isAWSCodeBuild,
   'bamboo': isBamboo,
   'bitbucket': 'BITBUCKET_BUILD_NUMBER',
   'buildkite': 'BUILDKITE',
@@ -89,6 +96,7 @@ const CI_PROVIDERS = {
   'codeshipBasic': isCodeshipBasic,
   'codeshipPro': isCodeshipPro,
   'concourse': isConcourse,
+  codeFresh: 'CF_BUILD_ID',
   'drone': 'DRONE',
   githubActions: 'GITHUB_ACTIONS',
   'gitlab': isGitlab,
@@ -101,6 +109,7 @@ const CI_PROVIDERS = {
   'teamfoundation': isTeamFoundation,
   'travis': 'TRAVIS',
   'wercker': isWercker,
+  netlify: 'NETLIFY',
 }
 
 const _detectProviderName = () => {
@@ -138,6 +147,13 @@ const _providerCiParams = () => {
       'BUILD_CONTAINERID',
       'BUILD_REPOSITORY_URI',
     ]),
+    awsCodeBuild: extract([
+      'CODEBUILD_BUILD_ID',
+      'CODEBUILD_BUILD_NUMBER',
+      'CODEBUILD_RESOLVED_SOURCE_VERSION',
+      'CODEBUILD_SOURCE_REPO_URL',
+      'CODEBUILD_SOURCE_VERSION',
+    ]),
     bamboo: extract([
       'bamboo_buildNumber',
       'bamboo_buildResultsUrl',
@@ -148,6 +164,12 @@ const _providerCiParams = () => {
       'BITBUCKET_REPO_SLUG',
       'BITBUCKET_REPO_OWNER',
       'BITBUCKET_BUILD_NUMBER',
+      'BITBUCKET_PARALLEL_STEP',
+      'BITBUCKET_STEP_RUN_NUMBER',
+      // the PR variables are only set on pull request builds
+      'BITBUCKET_PR_ID',
+      'BITBUCKET_PR_DESTINATION_BRANCH',
+      'BITBUCKET_PR_DESTINATION_COMMIT',
     ]),
     buildkite: extract([
       'BUILDKITE_REPO',
@@ -197,6 +219,20 @@ const _providerCiParams = () => {
       'BUILD_TEAM_NAME',
       'ATC_EXTERNAL_URL',
     ]),
+    // https://codefresh.io/docs/docs/codefresh-yaml/variables/
+    codeFresh: extract([
+      'CF_BUILD_ID',
+      'CF_BUILD_URL',
+      'CF_CURRENT_ATTEMPT',
+      'CF_STEP_NAME',
+      'CF_PIPELINE_NAME',
+      'CF_PIPELINE_TRIGGER_ID',
+      // variables added for pull requests
+      'CF_PULL_REQUEST_ID',
+      'CF_PULL_REQUEST_IS_FORK',
+      'CF_PULL_REQUEST_NUMBER',
+      'CF_PULL_REQUEST_TARGET',
+    ]),
     drone: extract([
       'DRONE_JOB_NUMBER',
       'DRONE_BUILD_LINK',
@@ -208,6 +244,8 @@ const _providerCiParams = () => {
       'GITHUB_WORKFLOW',
       'GITHUB_ACTION',
       'GITHUB_EVENT_NAME',
+      'GITHUB_RUN_ID',
+      'GITHUB_REPOSITORY',
     ]),
     // see https://docs.gitlab.com/ee/ci/variables/
     gitlab: extract([
@@ -225,6 +263,7 @@ const _providerCiParams = () => {
       'CI_PROJECT_URL',
       'CI_REPOSITORY_URL',
       'CI_ENVIRONMENT_URL',
+      'CI_DEFAULT_BRANCH',
     // for PRs: https://gitlab.com/gitlab-org/gitlab-ce/issues/23902
     ]),
     // https://docs.gocd.org/current/faq/dev_use_current_revision_in_build.html#standard-gocd-environment-variables
@@ -328,6 +367,7 @@ const _providerCiParams = () => {
     travis: extract([
       'TRAVIS_JOB_ID',
       'TRAVIS_BUILD_ID',
+      'TRAVIS_BUILD_WEB_URL',
       'TRAVIS_REPO_SLUG',
       'TRAVIS_JOB_NUMBER',
       'TRAVIS_EVENT_TYPE',
@@ -338,6 +378,15 @@ const _providerCiParams = () => {
       'TRAVIS_PULL_REQUEST_SHA',
     ]),
     wercker: null,
+    // https://docs.netlify.com/configure-builds/environment-variables/#deploy-urls-and-metadata
+    netlify: extract([
+      'BUILD_ID',
+      'CONTEXT',
+      'URL',
+      'DEPLOY_URL',
+      'DEPLOY_PRIME_URL',
+      'DEPLOY_ID',
+    ]),
   }
 }
 
@@ -359,6 +408,15 @@ const _providerCommitParams = () => {
       authorName: env.APPVEYOR_REPO_COMMIT_AUTHOR,
       authorEmail: env.APPVEYOR_REPO_COMMIT_AUTHOR_EMAIL,
       // remoteOrigin: ???
+      // defaultBranch: ???
+    },
+    awsCodeBuild: {
+      sha: env.CODEBUILD_RESOLVED_SOURCE_VERSION,
+      // branch: ???,
+      // message: ???
+      // authorName: ???
+      // authorEmail: ???
+      remoteOrigin: env.CODEBUILD_SOURCE_REPO_URL,
       // defaultBranch: ???
     },
     azure: {
@@ -422,6 +480,12 @@ const _providerCommitParams = () => {
       // remoteOrigin: ???
       // defaultBranch: ???
     },
+    codeFresh: {
+      sha: env.CF_REVISION,
+      branch: env.CF_BRANCH,
+      message: env.CF_COMMIT_MESSAGE,
+      authorName: env.CF_COMMIT_AUTHOR,
+    },
     drone: {
       sha: env.DRONE_COMMIT_SHA,
       branch: env.DRONE_COMMIT_BRANCH,
@@ -433,7 +497,7 @@ const _providerCommitParams = () => {
     },
     githubActions: {
       sha: env.GITHUB_SHA,
-      branch: env.GITHUB_REF,
+      branch: env.GH_BRANCH || env.GITHUB_REF,
       defaultBranch: env.GITHUB_BASE_REF,
       remoteBranch: env.GITHUB_HEAD_REF,
     },
@@ -443,8 +507,8 @@ const _providerCommitParams = () => {
       message: env.CI_COMMIT_MESSAGE,
       authorName: env.GITLAB_USER_NAME,
       authorEmail: env.GITLAB_USER_EMAIL,
-      // remoteOrigin: ???
-      // defaultBranch: ???
+      remoteOrigin: env.CI_REPOSITORY_URL,
+      defaultBranch: env.CI_DEFAULT_BRANCH,
     },
     googleCloud: {
       sha: env.COMMIT_SHA,
@@ -502,6 +566,11 @@ const _providerCommitParams = () => {
       // defaultBranch: ???
     },
     wercker: null,
+    netlify: {
+      sha: env.COMMIT_REF,
+      branch: env.BRANCH,
+      remoteOrigin: env.REPOSITORY_URL,
+    },
   }
 }
 

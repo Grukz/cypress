@@ -6,15 +6,29 @@ import debugModule from 'debug'
 
 const debugVerbose = debugModule('cypress-verbose:server:browsers:cdp_automation')
 
-interface CyCookie {
-  name: string
-  value: string
-  expirationDate: number
-  hostOnly: boolean
-  domain: string
-  path: string
-  secure: boolean
-  httpOnly: boolean
+export type CyCookie = Pick<chrome.cookies.Cookie, 'name' | 'value' | 'expirationDate' | 'hostOnly' | 'domain' | 'path' | 'secure' | 'httpOnly'> & {
+  // use `undefined` instead of `unspecified`
+  sameSite?: 'no_restriction' | 'lax' | 'strict'
+}
+
+function convertSameSiteExtensionToCdp (str: CyCookie['sameSite']): cdp.Network.CookieSameSite | undefined {
+  return str ? ({
+    'no_restriction': 'None',
+    'lax': 'Lax',
+    'strict': 'Strict',
+  })[str] : str as any
+}
+
+function convertSameSiteCdpToExtension (str: cdp.Network.CookieSameSite): chrome.cookies.SameSiteStatus {
+  if (_.isUndefined(str)) {
+    return str
+  }
+
+  if (str === 'None') {
+    return 'no_restriction'
+  }
+
+  return str.toLowerCase() as chrome.cookies.SameSiteStatus
 }
 
 // Cypress uses the webextension-style filtering
@@ -49,11 +63,16 @@ export const _cookieMatches = (cookie: CyCookie, filter: CyCookieFilter) => {
 export const CdpAutomation = (sendDebuggerCommandFn: SendDebuggerCommand) => {
   const normalizeGetCookieProps = (cookie: cdp.Network.Cookie): CyCookie => {
     if (cookie.expires === -1) {
+      // @ts-ignore
       delete cookie.expires
     }
 
     // @ts-ignore
+    cookie.sameSite = convertSameSiteCdpToExtension(cookie.sameSite)
+
+    // @ts-ignore
     cookie.expirationDate = cookie.expires
+    // @ts-ignore
     delete cookie.expires
 
     // @ts-ignore
@@ -69,31 +88,42 @@ export const CdpAutomation = (sendDebuggerCommandFn: SendDebuggerCommand) => {
     // see MakeCookieFromProtocolValues for information on how this cookie data will be parsed
     // @see https://cs.chromium.org/chromium/src/content/browser/devtools/protocol/network_handler.cc?l=246&rcl=786a9194459684dc7a6fded9cabfc0c9b9b37174
 
-    _.defaults(cookie, {
-      name: '',
-      value: '',
+    const setCookieRequest: cdp.Network.SetCookieRequest = _({
+      domain: cookie.domain,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      sameSite: convertSameSiteExtensionToCdp(cookie.sameSite),
+      expires: cookie.expirationDate,
     })
-
-    // @ts-ignore
-    cookie.expires = cookie.expirationDate
+    // Network.setCookie will error on any undefined/null parameters
+    .omitBy(_.isNull)
+    .omitBy(_.isUndefined)
+    // set name and value at the end to get the correct typing
+    .extend({
+      name: cookie.name || '',
+      value: cookie.value || '',
+    })
+    .value()
 
     // without this logic, a cookie being set on 'foo.com' will only be set for 'foo.com', not other subdomains
     if (!cookie.hostOnly && cookie.domain[0] !== '.') {
-      let parsedDomain = cors.parseDomain(cookie.domain)
+      const parsedDomain = cors.parseDomain(cookie.domain)
 
       // normally, a non-hostOnly cookie should be prefixed with a .
       // so if it's not a top-level domain (localhost, ...) or IP address
       // prefix it with a . so it becomes a non-hostOnly cookie
       if (parsedDomain && parsedDomain.tld !== cookie.domain) {
-        cookie.domain = `.${cookie.domain}`
+        setCookieRequest.domain = `.${cookie.domain}`
       }
     }
 
-    // not used by Chrome
-    delete cookie.hostOnly
-    delete cookie.expirationDate
+    if (setCookieRequest.name.startsWith('__Host-')) {
+      setCookieRequest.url = `https://${cookie.domain}`
+      delete setCookieRequest.domain
+    }
 
-    return cookie
+    return setCookieRequest
   }
 
   const getAllCookies = (filter: CyCookieFilter) => {
@@ -116,6 +146,9 @@ export const CdpAutomation = (sendDebuggerCommandFn: SendDebuggerCommand) => {
     })
     .then((result: cdp.Network.GetCookiesResponse) => {
       return normalizeGetCookies(result.cookies)
+      .filter((cookie) => {
+        return !(url.startsWith('http:') && cookie.secure)
+      })
     })
   }
 
@@ -168,7 +201,7 @@ export const CdpAutomation = (sendDebuggerCommandFn: SendDebuggerCommand) => {
       case 'remote:debugger:protocol':
         return sendDebuggerCommandFn(data.command, data.params)
       case 'take:screenshot':
-        return sendDebuggerCommandFn('Page.captureScreenshot')
+        return sendDebuggerCommandFn('Page.captureScreenshot', { format: 'png' })
         .catch((err) => {
           throw new Error(`The browser responded with an error when Cypress attempted to take a screenshot.\n\nDetails:\n${err.message}`)
         })

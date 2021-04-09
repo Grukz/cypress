@@ -7,7 +7,7 @@ const savedState = require(`${root}../lib/saved_state`)
 const menu = require(`${root}../lib/gui/menu`)
 const Events = require(`${root}../lib/gui/events`)
 const Windows = require(`${root}../lib/gui/windows`)
-const interactiveMode = require(`${root}../lib/modes/interactive`)
+const interactiveMode = require(`${root}../lib/modes/interactive-e2e`)
 
 describe('gui/interactive', () => {
   context('.isMac', () => {
@@ -84,21 +84,21 @@ describe('gui/interactive', () => {
       })
 
       it('calls menu.set withDevTools: true when in dev env', () => {
-        const env = process.env['CYPRESS_ENV']
+        const env = process.env['CYPRESS_INTERNAL_ENV']
 
-        process.env['CYPRESS_ENV'] = 'development'
+        process.env['CYPRESS_INTERNAL_ENV'] = 'development'
         interactiveMode.getWindowArgs({}).onFocus()
         expect(menu.set.lastCall.args[0].withDevTools).to.be.true
-        process.env['CYPRESS_ENV'] = env
+        process.env['CYPRESS_INTERNAL_ENV'] = env
       })
 
       it('calls menu.set withDevTools: false when not in dev env', () => {
-        const env = process.env['CYPRESS_ENV']
+        const env = process.env['CYPRESS_INTERNAL_ENV']
 
-        process.env['CYPRESS_ENV'] = 'production'
+        process.env['CYPRESS_INTERNAL_ENV'] = 'production'
         interactiveMode.getWindowArgs({}).onFocus()
         expect(menu.set.lastCall.args[0].withDevTools).to.be.false
-        process.env['CYPRESS_ENV'] = env
+        process.env['CYPRESS_INTERNAL_ENV'] = env
       })
     })
   })
@@ -113,7 +113,7 @@ describe('gui/interactive', () => {
       sinon.stub(Windows, 'open').resolves(this.win)
       sinon.stub(Windows, 'trackState')
 
-      const state = savedState()
+      const state = savedState.create()
 
       sinon.stub(state, 'get').resolves(this.state)
     })
@@ -137,24 +137,24 @@ describe('gui/interactive', () => {
     })
 
     it('calls menu.set withDevTools: true when in dev env', () => {
-      const env = process.env['CYPRESS_ENV']
+      const env = process.env['CYPRESS_INTERNAL_ENV']
 
-      process.env['CYPRESS_ENV'] = 'development'
+      process.env['CYPRESS_INTERNAL_ENV'] = 'development'
 
       return interactiveMode.ready({}).then(() => {
         expect(menu.set.lastCall.args[0].withDevTools).to.be.true
-        process.env['CYPRESS_ENV'] = env
+        process.env['CYPRESS_INTERNAL_ENV'] = env
       })
     })
 
     it('calls menu.set withDevTools: false when not in dev env', () => {
-      const env = process.env['CYPRESS_ENV']
+      const env = process.env['CYPRESS_INTERNAL_ENV']
 
-      process.env['CYPRESS_ENV'] = 'production'
+      process.env['CYPRESS_INTERNAL_ENV'] = 'production'
 
       return interactiveMode.ready({}).then(() => {
         expect(menu.set.lastCall.args[0].withDevTools).to.be.false
-        process.env['CYPRESS_ENV'] = env
+        process.env['CYPRESS_INTERNAL_ENV'] = env
       })
     })
 
@@ -167,7 +167,7 @@ describe('gui/interactive', () => {
 
   context('.run', () => {
     beforeEach(() => {
-      sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
+      sinon.stub(electron.app, 'whenReady').resolves()
     })
 
     it('calls ready with options', () => {

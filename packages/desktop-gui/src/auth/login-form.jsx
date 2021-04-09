@@ -25,7 +25,7 @@ class LoginForm extends Component {
       <div className='login-content'>
         {this._error()}
         <button
-          className={cs('btn btn-login btn-black btn-block', {
+          className={cs('btn btn-login btn-primary btn-wide', {
             disabled: this.state.isLoggingIn,
           })}
           onClick={this._login}
@@ -61,7 +61,7 @@ class LoginForm extends Component {
       if (message && message.name === 'AUTH_COULD_NOT_LAUNCH_BROWSER') {
         return (
           <span>
-            <i className='fas fa-exclamation-triangle'></i>{' '}
+            <i className='fas fa-exclamation-triangle' />{' '}
             Could not open browser.
           </span>
         )
@@ -69,7 +69,7 @@ class LoginForm extends Component {
 
       return (
         <span>
-          <i className='fas fa-spinner fa-spin'></i>{' '}
+          <i className='fas fa-spinner fa-spin' />{' '}
           {message && message.browserOpened ? 'Waiting for browser login...' : 'Opening browser...'}
         </span>
       )
@@ -90,7 +90,7 @@ class LoginForm extends Component {
     return (
       <div className='alert alert-danger'>
         <p>
-          <i className='fas fa-exclamation-triangle'></i>{' '}
+          <i className='fas fa-exclamation-triangle' />{' '}
           <strong>Can't Log In</strong>
         </p>
         <p>{this._errorMessage(error.message)}</p>
@@ -115,7 +115,7 @@ class LoginForm extends Component {
 
     this.setState({ isLoggingIn: true })
 
-    authApi.login()
+    authApi.login(this.props.utm)
     .then(() => {
       this.props.onSuccess()
     })

@@ -1,5 +1,6 @@
 import Bluebird from 'bluebird'
 import { create } from '../../../lib/browsers/cri-client'
+import EventEmitter from 'events'
 
 const { expect, proxyquire, sinon } = require('../../spec_helper')
 
@@ -11,26 +12,31 @@ describe('lib/browsers/cri-client', function () {
   }
   let send: sinon.SinonStub
   let criImport: sinon.SinonStub
-
-  function getClient () {
-    return criClient.create(DEBUGGER_URL)
-  }
+  let onError: sinon.SinonStub
+  let getClient: () => ReturnType<typeof create>
 
   beforeEach(function () {
     sinon.stub(Bluebird, 'promisify').returnsArg(0)
 
     send = sinon.stub()
+    onError = sinon.stub()
 
     criImport = sinon.stub()
     .withArgs({
       target: DEBUGGER_URL,
       local: true,
     })
-    .resolves({ send })
+    .resolves({
+      send,
+      close: sinon.stub(),
+      _notifier: new EventEmitter(),
+    })
 
     criClient = proxyquire('../lib/browsers/cri-client', {
       'chrome-remote-interface': criImport,
     })
+
+    getClient = () => criClient.create(DEBUGGER_URL, onError)
   })
 
   context('.create', function () {
@@ -47,6 +53,37 @@ describe('lib/browsers/cri-client', function () {
 
         client.send('Browser.getVersion', { baz: 'quux' })
         expect(send).to.be.calledWith('Browser.getVersion', { baz: 'quux' })
+      })
+
+      it('rejects if cri.send rejects', async function () {
+        const err = new Error
+
+        send.rejects(err)
+        const client = await getClient()
+
+        await expect(client.send('Browser.getVersion', { baz: 'quux' }))
+        .to.be.rejectedWith(err)
+      })
+
+      context('retries', () => {
+        ([
+          'WebSocket is not open',
+          // @see https://github.com/cypress-io/cypress/issues/7180
+          'WebSocket is already in CLOSING or CLOSED state',
+        ]).forEach((msg) => {
+          it(`with '${msg}'`, async function () {
+            const err = new Error(msg)
+
+            send.onFirstCall().rejects(err)
+            send.onSecondCall().resolves()
+
+            const client = await getClient()
+
+            await client.send('Browser.getVersion', { baz: 'quux' })
+
+            expect(send).to.be.calledTwice
+          })
+        })
       })
     })
 

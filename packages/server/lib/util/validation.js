@@ -2,6 +2,7 @@ const _ = require('lodash')
 const debug = require('debug')('cypress:server:validation')
 const is = require('check-more-types')
 const { commaListsOr } = require('common-tags')
+const configOptions = require('../config_options')
 
 // validation functions take a key and a value and should:
 //  - return true if it passes validation
@@ -18,7 +19,7 @@ const str = JSON.stringify
 */
 const errMsg = (key, value, type) => {
   return `Expected \`${key}\` to be ${type}. Instead the value was: \`${str(
-    value
+    value,
   )}\``
 }
 
@@ -47,7 +48,8 @@ const isValidBrowser = (browser) => {
     return errMsg('name', browser, 'a non-empty string')
   }
 
-  const knownBrowserFamilies = ['electron', 'chrome', 'firefox']
+  // TODO: this is duplicated with browsers/index
+  const knownBrowserFamilies = ['chromium', 'firefox']
 
   if (!is.oneOf(knownBrowserFamilies)(browser.family)) {
     return errMsg('family', browser, commaListsOr`either ${knownBrowserFamilies}`)
@@ -88,7 +90,7 @@ const isValidBrowserList = (key, browsers) => {
   }
 
   if (!browsers.length) {
-    return 'Expected at list one browser'
+    return 'Expected at least one browser'
   }
 
   for (let k = 0; k < browsers.length; k += 1) {
@@ -102,10 +104,99 @@ const isValidBrowserList = (key, browsers) => {
   return true
 }
 
+const isValidRetriesConfig = (key, value) => {
+  const optionalKeys = ['runMode', 'openMode']
+  const isValidRetryValue = (val) => _.isNull(val) || (Number.isInteger(val) && val >= 0)
+  const optionalKeysAreValid = (val, k) => optionalKeys.includes(k) && isValidRetryValue(val)
+
+  if (isValidRetryValue(value)) {
+    return true
+  }
+
+  if (_.isObject(value) && _.every(value, optionalKeysAreValid)) {
+    return true
+  }
+
+  return errMsg(key, value, 'a positive number or null or an object with keys "openMode" and "runMode" with values of numbers or nulls')
+}
+
+const isValidFirefoxGcInterval = (key, value) => {
+  const isIntervalValue = (val) => {
+    if (isNumber(val)) {
+      return val >= 0
+    }
+
+    return val == null
+  }
+
+  if (isIntervalValue(value)
+      || (_.isEqual(_.keys(value), ['runMode', 'openMode'])
+          && isIntervalValue(value.runMode)
+          && isIntervalValue(value.openMode))) {
+    return true
+  }
+
+  return errMsg(key, value, 'a positive number or null or an object with "openMode" and "runMode" as keys and positive numbers or nulls as values')
+}
+
+const isPlainObject = (key, value) => {
+  if (value == null || _.isPlainObject(value)) {
+    return true
+  }
+
+  return errMsg(key, value, 'a plain object')
+}
+
+const isValidConfig = (key, config) => {
+  const status = isPlainObject(key, config)
+
+  if (status !== true) {
+    return status
+  }
+
+  for (const rule of configOptions.options) {
+    if (rule.name in config && rule.validation) {
+      const status = rule.validation(`${key}.${rule.name}`, config[rule.name])
+
+      if (status !== true) {
+        return status
+      }
+    }
+  }
+
+  return true
+}
+
+const isOneOf = (...values) => {
+  return (key, value) => {
+    if (values.some((v) => {
+      if (typeof value === 'function') {
+        return value(v)
+      }
+
+      return v === value
+    })) {
+      return true
+    }
+
+    const strings = values.map(str).join(', ')
+
+    return errMsg(key, value, `one of these values: ${strings}`)
+  }
+}
+
 module.exports = {
   isValidBrowser,
 
   isValidBrowserList,
+
+  isValidFirefoxGcInterval,
+
+  isValidRetriesConfig,
+
+  isValidConfig,
+
+  isPlainObject,
 
   isNumber (key, value) {
     if (value == null || isNumber(value)) {
@@ -131,7 +222,7 @@ module.exports = {
     return errMsg(
       key,
       value,
-      'a fully qualified URL (starting with `http://` or `https://`)'
+      'a fully qualified URL (starting with `http://` or `https://`)',
     )
   },
 
@@ -141,14 +232,6 @@ module.exports = {
     }
 
     return errMsg(key, value, 'a boolean')
-  },
-
-  isPlainObject (key, value) {
-    if (value == null || _.isPlainObject(value)) {
-      return true
-    }
-
-    return errMsg(key, value, 'a plain object')
   },
 
   isString (key, value) {
@@ -192,17 +275,5 @@ module.exports = {
     validate("example", "else") // error message string
     ```
    */
-  isOneOf (...values) {
-    return (key, value) => {
-      if (values.some((v) => {
-        return v === value
-      })) {
-        return true
-      }
-
-      const strings = values.map(str).join(', ')
-
-      return errMsg(key, value, `one of these values: ${strings}`)
-    }
-  },
+  isOneOf,
 }

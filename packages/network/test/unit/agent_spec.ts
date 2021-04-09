@@ -3,19 +3,23 @@ import chai from 'chai'
 import http from 'http'
 import https from 'https'
 import net from 'net'
-import request from 'request-promise'
 import sinon from 'sinon'
 import sinonChai from 'sinon-chai'
 import tls from 'tls'
 import url from 'url'
 import DebuggingProxy from '@cypress/debugging-proxy'
-import Io from '@packages/socket'
+import request from '@cypress/request-promise'
+import * as socketIo from '@packages/socket'
 import {
-  buildConnectReqHead, createProxySock, isRequestHttps, isResponseStatusCode200,
-  regenerateRequestHead, CombinedAgent,
+  buildConnectReqHead,
+  createProxySock,
+  isRequestHttps,
+  isResponseStatusCode200,
+  regenerateRequestHead,
+  CombinedAgent,
 } from '../../lib/agent'
-import { AsyncServer, Servers } from '../support/servers'
 import { allowDestroy } from '../../lib/allow-destroy'
+import { AsyncServer, Servers } from '../support/servers'
 
 const expect = chai.expect
 
@@ -74,6 +78,11 @@ describe('lib/agent', function () {
       context(testCase.name, function () {
         beforeEach(function () {
           if (testCase.proxyUrl) {
+            // PROXY vars should override npm_config vars, so set them to cause failures if they are used
+            // @see https://github.com/cypress-io/cypress/pull/8295
+            process.env.npm_config_proxy = process.env.npm_config_https_proxy = 'http://erroneously-used-npm-proxy.invalid'
+            process.env.npm_config_noproxy = 'just,some,nonsense'
+
             process.env.HTTP_PROXY = process.env.HTTPS_PROXY = testCase.proxyUrl
             process.env.NO_PROXY = ''
           }
@@ -175,12 +184,14 @@ describe('lib/agent', function () {
         })
 
         it('HTTP websocket connections can be established and used', function () {
+          const socket = socketIo.client(`http://localhost:${HTTP_PORT}`, {
+            agent: this.agent,
+            transports: ['websocket'],
+            rejectUnauthorized: false,
+          })
+
           return new Bluebird((resolve) => {
-            Io.client(`http://localhost:${HTTP_PORT}`, {
-              agent: this.agent,
-              transports: ['websocket'],
-              rejectUnauthorized: false,
-            }).on('message', resolve)
+            socket.on('message', resolve)
           })
           .then((msg) => {
             expect(msg).to.eq('It worked!')
@@ -188,16 +199,20 @@ describe('lib/agent', function () {
               expect(this.debugProxy.requests[0].ws).to.be.true
               expect(this.debugProxy.requests[0].url).to.include('http://localhost:31080')
             }
+
+            socket.close()
           })
         })
 
         it('HTTPS websocket connections can be established and used', function () {
+          const socket = socketIo.client(`https://localhost:${HTTPS_PORT}`, {
+            agent: this.agent,
+            transports: ['websocket'],
+            rejectUnauthorized: false,
+          })
+
           return new Bluebird((resolve) => {
-            Io.client(`https://localhost:${HTTPS_PORT}`, {
-              agent: this.agent,
-              transports: ['websocket'],
-              rejectUnauthorized: false,
-            }).on('message', resolve)
+            socket.on('message', resolve)
           })
           .then((msg) => {
             expect(msg).to.eq('It worked!')
@@ -206,6 +221,8 @@ describe('lib/agent', function () {
                 url: 'localhost:31443',
               })
             }
+
+            socket.close()
           })
         })
 
@@ -228,7 +245,7 @@ describe('lib/agent', function () {
         this.agent = new CombinedAgent()
 
         this.request = request.defaults({
-          agent: <any> this.agent,
+          agent: this.agent as any,
           proxy: null,
         })
       })
@@ -289,8 +306,8 @@ describe('lib/agent', function () {
           allowDestroy(
             net.createServer((socket) => {
               socket.end()
-            })
-          )
+            }),
+          ),
         ) as net.Server & AsyncServer
 
         const proxyPort = PROXY_PORT + 2
@@ -308,7 +325,7 @@ describe('lib/agent', function () {
           throw new Error('should not succeed')
         })
         .catch((e) => {
-          expect(e.message).to.eq('Error: A connection to the upstream proxy could not be established: The upstream proxy closed the socket after connecting but before sending a response.')
+          expect(e.message).to.eq('Error: A connection to the upstream proxy could not be established: ERR_EMPTY_RESPONSE: The upstream proxy closed the socket after connecting but before sending a response.')
 
           return proxy.destroyAsync()
         })
@@ -320,7 +337,7 @@ describe('lib/agent', function () {
         this.agent = new CombinedAgent()
 
         this.request = request.defaults({
-          agent: <any> this.agent,
+          agent: this.agent as any,
           proxy: null,
         })
       })
@@ -439,21 +456,23 @@ describe('lib/agent', function () {
 
       it(`detects correctly from ${testCase.protocol} websocket requests`, () => {
         const spy = sinon.spy(testCase.agent, 'addRequest')
+        const socket = socketIo.client(`${testCase.protocol}://foo.bar.baz.invalid`, {
+          agent: <any>testCase.agent,
+          transports: ['websocket'],
+          timeout: 1,
+          rejectUnauthorized: false,
+        })
 
         return new Bluebird((resolve, reject) => {
-          Io.client(`${testCase.protocol}://foo.bar.baz.invalid`, {
-            agent: <any>testCase.agent,
-            transports: ['websocket'],
-            timeout: 1,
-            rejectUnauthorized: false,
-          })
-          .on('message', reject)
-          .on('connect_error', resolve)
+          socket.on('message', reject)
+          socket.io.on('error', resolve)
         })
         .then(() => {
           const requestOptions = spy.getCall(0).args[1]
 
           expect(isRequestHttps(requestOptions)).to.equal(testCase.expect)
+
+          socket.close()
         })
       })
     })

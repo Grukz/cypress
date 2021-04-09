@@ -1,6 +1,6 @@
 import { action, computed, observable } from 'mobx'
 
-import Err from '../lib/err-model'
+import Err from '../errors/err-model'
 import Instrument, { InstrumentProps } from '../instruments/instrument-model'
 import { TimeoutID } from '../lib/types'
 
@@ -17,8 +17,11 @@ export interface CommandProps extends InstrumentProps {
   number?: number
   numElements: number
   renderProps?: RenderProps
+  timeout?: number
   visible?: boolean
-  hookName: string
+  wallClockStartedAt?: string
+  hookId: string
+  isStudio?: boolean
 }
 
 export default class Command extends Instrument {
@@ -28,9 +31,13 @@ export default class Command extends Instrument {
   @observable isLongRunning = false
   @observable number?: number
   @observable numElements: number
+  @observable timeout?: number
   @observable visible?: boolean = true
+  @observable wallClockStartedAt?: string
   @observable duplicates: Array<Command> = []
   @observable isDuplicate = false
+  @observable hookId: string
+  @observable isStudio: boolean
 
   private _prevState: string | null | undefined = null
   private _pendingTimeout?: TimeoutID = undefined
@@ -56,7 +63,11 @@ export default class Command extends Instrument {
     this.number = props.number
     this.numElements = props.numElements
     this.renderProps = props.renderProps || {}
+    this.timeout = props.timeout
     this.visible = props.visible
+    this.wallClockStartedAt = props.wallClockStartedAt
+    this.hookId = props.hookId
+    this.isStudio = !!props.isStudio
 
     this._checkLongRunning()
   }
@@ -69,6 +80,7 @@ export default class Command extends Instrument {
     this.numElements = props.numElements
     this.renderProps = props.renderProps || {}
     this.visible = props.visible
+    this.timeout = props.timeout
 
     this._checkLongRunning()
   }
@@ -101,9 +113,6 @@ export default class Command extends Instrument {
 
     if (this._becameNonPending()) {
       clearTimeout(this._pendingTimeout as TimeoutID)
-      action('became:inactive', () => {
-        return this.isLongRunning = false
-      })()
     }
 
     this._prevState = this.state

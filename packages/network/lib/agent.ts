@@ -6,6 +6,7 @@ import net from 'net'
 import { getProxyForUrl } from 'proxy-from-env'
 import url from 'url'
 import { createRetryingSocket, getAddress } from './connect'
+import { lenientOptions } from './http-utils'
 
 const debug = debugModule('cypress:network:agent')
 const CRLF = '\r\n'
@@ -105,7 +106,7 @@ export const regenerateRequestHead = (req: http.ClientRequest) => {
 const getFirstWorkingFamily = (
   { port, host }: http.RequestOptions,
   familyCache: FamilyCache,
-  cb: Function
+  cb: Function,
 ) => {
   // this is a workaround for localhost (and potentially others) having invalid
   // A records but valid AAAA records. here, we just cache the family of the first
@@ -151,6 +152,8 @@ export class CombinedAgent {
 
   // called by Node.js whenever a new request is made internally
   addRequest (req: http.ClientRequest, options: http.RequestOptions, port?: number, localAddress?: string) {
+    _.merge(req, lenientOptions)
+
     // Legacy API: addRequest(req, host, port, localAddress)
     // https://github.com/nodejs/node/blob/cb68c04ce1bc4534b2d92bc7319c6ff6dda0180d/lib/_http_agent.js#L148-L155
     if (typeof options === 'string') {
@@ -262,10 +265,6 @@ class HttpsAgent extends https.Agent {
   }
 
   createConnection (options: HttpsRequestOptions, cb: http.SocketCallback) {
-    // allow requests to use older TLS versions
-    // https://github.com/cypress-io/cypress/issues/5446
-    options.minVersion = 'TLSv1'
-
     if (process.env.HTTPS_PROXY) {
       const proxy = getProxyForUrl(options.href)
 
@@ -293,14 +292,14 @@ class HttpsAgent extends https.Agent {
       if (originalErr) {
         const err: any = new Error(`A connection to the upstream proxy could not be established: ${originalErr.message}`)
 
-        err[0] = originalErr
+        err.originalErr = originalErr
         err.upstreamProxyConnect = true
 
         return cb(err, undefined)
       }
 
       const onClose = () => {
-        triggerRetry(new Error('The upstream proxy closed the socket after connecting but before sending a response.'))
+        triggerRetry(new Error('ERR_EMPTY_RESPONSE: The upstream proxy closed the socket after connecting but before sending a response.'))
       }
 
       const onError = (err: Error) => {
@@ -353,6 +352,7 @@ class HttpsAgent extends https.Agent {
 
       const connectReq = buildConnectReqHead(hostname, port, proxy)
 
+      proxySocket.setNoDelay(true)
       proxySocket.write(connectReq)
     })
   }

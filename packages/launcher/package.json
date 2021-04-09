@@ -1,42 +1,39 @@
 {
   "name": "@packages/launcher",
-  "version": "0.0.0",
+  "version": "0.0.0-development",
   "private": true,
   "main": "index.js",
   "scripts": {
-    "build": "bin-up tsc --project .",
-    "build-js": "bin-up tsc --project .",
-    "build-prod": "npm run build",
-    "check-deps": "node ../../scripts/check-deps.js --verbose",
-    "check-deps-pre": "npm run check-deps -- --prescript",
-    "preclean": "npm run check-deps-pre",
+    "build-prod": "tsc --project .",
     "clean": "node scripts/clean.js || true",
     "clean-deps": "rm -rf node_modules",
-    "clean-js": "npm run clean",
-    "size": "npm pack --dry",
-    "pretest": "npm run check-deps-pre",
-    "test": "npm run unit",
-    "unit": "bin-up mocha --reporter mocha-multi-reporters --reporter-options configFile=../../mocha-reporter-config.json"
+    "clean-js": "yarn clean",
+    "size": "t=\"cypress-v0.0.0.tgz\"; yarn pack --filename \"${t}\"; wc -c \"cli/${t}\"; tar tvf \"${t}\"; rm \"${t}\";",
+    "test": "yarn test-unit",
+    "test-unit": "mocha --reporter mocha-multi-reporters --reporter-options configFile=../../mocha-reporter-config.json"
   },
   "dependencies": {
     "bluebird": "3.5.3",
-    "debug": "4.1.1",
-    "execa": "1.0.0",
+    "debug": "4.3.2",
+    "execa": "4.0.0",
     "fs-extra": "8.1.0",
-    "lodash": "4.17.15",
-    "plist": "2.1.0",
-    "ramda": "0.24.1"
+    "lodash": "4.17.19",
+    "plist": "3.0.1",
+    "ramda": "0.27.1"
   },
   "devDependencies": {
-    "bin-up": "1.2.2",
+    "@packages/ts": "0.0.0-development",
     "chai": "3.5.0",
+    "chai-as-promised": "7.1.1",
     "cross-env": "6.0.3",
+    "mocha": "3.5.3",
     "shelljs": "0.8.3",
-    "sinon": "2.4.1",
-    "sinon-chai": "3.3.0"
+    "sinon": "^10.0.0",
+    "sinon-chai": "3.4.0",
+    "typescript": "^4.2.3"
   },
   "files": [
     "lib"
   ],
-  "types": "./lib/types.ts"
+  "types": "index.ts"
 }

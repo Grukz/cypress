@@ -38,18 +38,23 @@
       i {
         font-size: 11px;
         color: #555;
+        margin-right: 5px;
+        position: relative;
+        top: -1px;
       }
     }
 
     > li {
+      display: flex;
+
       > div,
       > a {
-        font-size: 13px;
+        align-items: center;
         color: #444;
-        padding: 1px 20px 0 20px;
-        line-height: 35px;
-
-
+        display: flex;
+        font-size: 13px;
+        justify-content: center;
+        padding: 13px 20px;
       }
 
       > a  {
@@ -80,6 +85,9 @@
   }
 
   .browsers.nav {
+    align-items: center;
+    display: flex;
+
     i {
       font-size: 13px;
 
@@ -131,8 +139,8 @@
   }
 
   .nav {
-    > .open {
-      > a, > a:hover, > a:focus {
+    .dropdown-chosen {
+      &:hover, &:focus {
         background-color: #111;
         color: #fff;
       }
@@ -142,6 +150,13 @@
       font-size: 12px;
     }
 
+    .dropdown-menu > li {
+      line-height: 30px;
+      font-size: 14px;
+      padding: 5px 15px;
+    }
+
+    .dropdown-chosen,
     > li > div,
     > li > a,
     > li > span > a  {
@@ -152,10 +167,11 @@
       display: inline-block;
     }
 
+    .dropdown-chosen,
     > li > a,
     > li > span > a  {
       &:hover,
-      a:focus {
+      &:focus {
         color: #fff;
         background-color: #3b414a;
       }
@@ -164,31 +180,53 @@
 }
 
 .browsers-list {
-  > span {
+  margin: 5px;
+
+  li {
     padding: 9px 15px;
-    display: inline-block;
+    white-space: nowrap;
   }
 
-  .browser-icon { 
-    color: #4573d9; 
+  .dropdown-chosen {
+    align-items: center;
+    background: #f6f6f6;
+    border: 1px solid #c7c7c7;
+    border-radius: 4px;
+    display: flex;
+    height: 34px;
+    padding: 0 7px;
+    justify-content: center;
+
+    img {
+      margin-right: 5px;
+    }
+
+    &.disabled,
+    &:active {
+      background-color: #dedede;
+    }
   }
 
-  .chrome > .browser-icon { 
-    color: #1da261; 
-  }
-  .canary > .browser-icon { 
-    color: #f29b14; 
-  }
-  .chromium > .browser-icon { 
-    color: #4573d9; 
-  }
-  .electron > .browser-icon { 
-    color: #2b2e3a; 
-  }
-  .firefox > .browser-icon { 
-    color: #ff720d; 
+  .dropdown-toggle {
+    margin-left: 4px;
   }
 
+  .fa-check-circle, .fa-sync-alt {
+    margin-right: 5px;
+  }
+
+  .browser-icon {
+    color: #4573d9;
+    margin-right: 3px;
+    position: relative;
+    top: -1px;
+    width: 15px;
+    height: 15px;
+
+    &.fa-globe {
+      top: 0;
+    }
+  }
 
   .dropdown-menu {
     left: auto;
@@ -225,6 +263,11 @@
 
 .close-browser {
   .btn {
-    margin-top: 7px;
+    padding: 6px 9px;
+    font-size: 13px;
+
+    i {
+      margin-right: 3px;
+    }
   }
 }

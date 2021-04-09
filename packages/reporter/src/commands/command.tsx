@@ -46,7 +46,7 @@ interface AliasReferenceProps {
 const AliasReference = observer(({ aliasObj, model, aliasesWithDuplicates }: AliasReferenceProps) => {
   if (shouldShowCount(aliasesWithDuplicates, aliasObj.name, model)) {
     return (
-      <Tooltip placement='top' title={`Found ${aliasObj.ordinal} alias for: '${aliasObj.name}'`}>
+      <Tooltip placement='top' title={`Found ${aliasObj.ordinal} alias for: '${aliasObj.name}'`} className='cy-tooltip'>
         <span>
           <span className={`command-alias ${model.aliasType} show-count`}>@{aliasObj.name}</span>
           <span className={'command-alias-count'}>{aliasObj.cardinal}</span>
@@ -56,7 +56,7 @@ const AliasReference = observer(({ aliasObj, model, aliasesWithDuplicates }: Ali
   }
 
   return (
-    <Tooltip placement='top' title={`Found an alias for: '${aliasObj.name}'`}>
+    <Tooltip placement='top' title={`Found an alias for: '${aliasObj.name}'`} className='cy-tooltip'>
       <span className={`command-alias ${model.aliasType}`}>@{aliasObj.name}</span>
     </Tooltip>
   )
@@ -88,7 +88,7 @@ const Aliases = observer(({ model, aliasesWithDuplicates }: AliasesProps) => {
   return (
     <span>
       {_.map(([] as Array<Alias>).concat(model.alias), (alias) => (
-        <Tooltip key={alias} placement='top' title={`${model.displayMessage} aliased as: '${alias}'`}>
+        <Tooltip key={alias} placement='top' title={`${model.displayMessage} aliased as: '${alias}'`} className='cy-tooltip'>
           <span className={cs('command-alias', `${model.aliasType}`, { 'show-count': shouldShowCount(aliasesWithDuplicates, alias, model) })}>
             {alias}
           </span>
@@ -98,15 +98,40 @@ const Aliases = observer(({ model, aliasesWithDuplicates }: AliasesProps) => {
   )
 })
 
-const Message = observer(({ model }) => (
+interface MessageProps {
+  model: CommandModel
+}
+
+const Message = observer(({ model }: MessageProps) => (
   <span>
-    <i className={`fas fa-circle ${model.renderProps.indicator}`}></i>
+    <i className={`fas fa-circle ${model.renderProps.indicator}`} />
     <span
       className='command-message-text'
-      dangerouslySetInnerHTML={{ __html: formattedMessage(model.displayMessage) }}
+      dangerouslySetInnerHTML={{ __html: formattedMessage(model.displayMessage || '') }}
     />
   </span>
 ))
+
+interface ProgressProps {
+  model: CommandModel
+}
+
+const Progress = observer(({ model }: ProgressProps) => {
+  if (!model.timeout || !model.wallClockStartedAt) {
+    return <div className='command-progress'><span /></div>
+  }
+
+  const timeElapsed = Date.now() - new Date(model.wallClockStartedAt).getTime()
+  const timeRemaining = model.timeout ? model.timeout - timeElapsed : 0
+  const percentageRemaining = timeRemaining / model.timeout || 0
+
+  // we add a key to the span to ensure a rerender and restart of the animation on change
+  return (
+    <div className='command-progress'>
+      <span style={{ animationDuration: `${timeRemaining}ms`, transform: `scaleX(${percentageRemaining})` }} key={timeRemaining} />
+    </div>
+  )
+})
 
 interface Props {
   model: CommandModel
@@ -139,10 +164,10 @@ class Command extends Component<Props> {
           `command-state-${model.state}`,
           `command-type-${model.type}`,
           {
+            'command-is-studio': model.isStudio,
             'command-is-event': !!model.event,
             'command-is-invisible': model.visible != null && !model.visible,
             'command-has-num-elements': model.state !== 'pending' && model.numElements != null,
-            'command-other-pinned': this._isOtherCommandPinned(),
             'command-is-pinned': this._isPinned(),
             'command-with-indicator': !!model.renderProps.indicator,
             'command-scaled': message && message.length > 100,
@@ -151,7 +176,7 @@ class Command extends Component<Props> {
             'command-has-duplicates': model.hasDuplicates,
             'command-is-duplicate': model.isDuplicate,
             'command-is-open': this.isOpen,
-          }
+          },
         )}
         onMouseOver={() => this._snapshot(true)}
         onMouseOut={() => this._snapshot(false)}
@@ -162,36 +187,40 @@ class Command extends Component<Props> {
           shouldShowMessage={this._shouldShowClickMessage}
         >
           <div className='command-wrapper'>
-            <span className='command-number'>
-              <i className='fas fa-spinner fa-spin'></i>
-              <span>{model.number || ''}</span>
-            </span>
-            <span className='command-pin'>
-              <i className='fas fa-thumbtack'></i>
-            </span>
-            <span className='command-expander' onClick={this._toggleOpen}>
-              <i className='fas'></i>
-            </span>
-            <span className='command-method'>
-              <span>{model.event ? `(${displayName(model)})` : displayName(model)}</span>
-            </span>
-            <span className='command-message'>
-              {model.referencesAlias ? <AliasesReferences model={model} aliasesWithDuplicates={aliasesWithDuplicates} /> : <Message model={model} />}
-            </span>
-            <span className='command-controls'>
-              <Tooltip placement='top' title={visibleMessage(model)}>
-                <i className='command-invisible far fa-eye-slash'></i>
-              </Tooltip>
-              <Tooltip placement='top' title={`${model.numElements} matched elements`}>
-                <span className='num-elements'>{model.numElements}</span>
-              </Tooltip>
-              <span className='alias-container'>
-                <Aliases model={model} aliasesWithDuplicates={aliasesWithDuplicates} />
-                <Tooltip placement='top' title={`This event occurred ${model.numDuplicates} times`}>
-                  <span className={cs('num-duplicates', { 'has-alias': model.alias })}>{model.numDuplicates}</span>
-                </Tooltip>
+            <div className='command-wrapper-text'>
+              <span className='command-number'>
+                <i className='fas fa-spinner fa-spin' />
+                <span>{model.number || ''}</span>
               </span>
-            </span>
+              <span className='command-pin'>
+                <i className='fas fa-thumbtack' />
+              </span>
+              <span className='command-expander' onClick={this._toggleOpen}>
+                <i className='fas' />
+              </span>
+              <span className='command-method'>
+                <span>{model.event ? `(${displayName(model)})` : displayName(model)}</span>
+              </span>
+              <span className='command-message'>
+                {model.referencesAlias ? <AliasesReferences model={model} aliasesWithDuplicates={aliasesWithDuplicates} /> : <Message model={model} />}
+              </span>
+              <span className='command-controls'>
+                <i className='far fa-times-circle studio-command-remove' onClick={this._removeStudioCommand} />
+                <Tooltip placement='top' title={visibleMessage(model)} className='cy-tooltip'>
+                  <i className='command-invisible far fa-eye-slash' />
+                </Tooltip>
+                <Tooltip placement='top' title={`${model.numElements} matched elements`} className='cy-tooltip'>
+                  <span className='num-elements'>{model.numElements}</span>
+                </Tooltip>
+                <span className='alias-container'>
+                  <Aliases model={model} aliasesWithDuplicates={aliasesWithDuplicates} />
+                  <Tooltip placement='top' title={`This event occurred ${model.numDuplicates} times`} className='cy-tooltip'>
+                    <span className={cs('num-duplicates', { 'has-alias': model.alias })}>{model.numDuplicates}</span>
+                  </Tooltip>
+                </span>
+              </span>
+            </div>
+            <Progress model={model} />
           </div>
         </FlashOnClick>
         {this._duplicates()}
@@ -224,12 +253,6 @@ class Command extends Component<Props> {
     return this.props.appState.pinnedSnapshotId === this.props.model.id
   }
 
-  _isOtherCommandPinned () {
-    const pinnedId = this.props.appState.pinnedSnapshotId
-
-    return pinnedId != null && pinnedId !== this.props.model.id
-  }
-
   _shouldShowClickMessage = () => {
     return !this.props.appState.isRunning && this._isPinned()
   }
@@ -241,7 +264,7 @@ class Command extends Component<Props> {
   }
 
   @action _onClick = () => {
-    if (this.props.appState.isRunning) return
+    if (this.props.appState.isRunning || this.props.appState.studioActive) return
 
     const { id } = this.props.model
 
@@ -297,8 +320,19 @@ class Command extends Component<Props> {
       }, 50)
     }
   }
+
+  _removeStudioCommand = (e: MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const { model, events } = this.props
+
+    if (!model.isStudio) return
+
+    events.emit('studio:remove:command', model.number)
+  }
 }
 
-export { Aliases, AliasesReferences, Message }
+export { Aliases, AliasesReferences, Message, Progress }
 
 export default Command

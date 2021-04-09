@@ -5,9 +5,9 @@ const Promise = require('bluebird')
 const cypressEx = require('@packages/example')
 const snapshot = require('snap-shot-it')
 const config = require(`${root}lib/config`)
-const Project = require(`${root}lib/project`)
+const { ProjectE2E } = require(`${root}lib/project-e2e`)
 const scaffold = require(`${root}lib/scaffold`)
-const fs = require(`${root}lib/util/fs`)
+const { fs } = require(`${root}lib/util/fs`)
 const glob = require(`${root}lib/util/glob`)
 const Fixtures = require(`${root}/test/support/helpers/fixtures`)
 
@@ -40,7 +40,7 @@ describe('lib/scaffold', () => {
 
     it('is false when files.length isnt 1', function () {
       const id = () => {
-        this.ids = new Project(this.idsPath)
+        this.ids = new ProjectE2E(this.idsPath)
 
         return this.ids.getConfig()
         .then((cfg) => {
@@ -53,7 +53,7 @@ describe('lib/scaffold', () => {
       }
 
       const todo = () => {
-        this.todos = new Project(this.todosPath)
+        this.todos = new ProjectE2E(this.todosPath)
 
         return this.todos.getConfig()
         .then((cfg) => {
@@ -70,7 +70,7 @@ describe('lib/scaffold', () => {
 
     it('is true when files, name + bytes match to scaffold', function () {
       // TODO this test really can move to scaffold
-      const pristine = new Project(this.pristinePath)
+      const pristine = new ProjectE2E(this.pristinePath)
 
       return pristine.getConfig()
       .then((cfg) => {
@@ -84,7 +84,7 @@ describe('lib/scaffold', () => {
 
     it('is false when bytes dont match scaffold', function () {
       // TODO this test really can move to scaffold
-      const pristine = new Project(this.pristinePath)
+      const pristine = new ProjectE2E(this.pristinePath)
 
       return pristine.getConfig()
       .then((cfg) => {
@@ -122,14 +122,14 @@ describe('lib/scaffold', () => {
     it('creates both integrationFolder and example specs when integrationFolder does not exist', function () {
       return Promise.join(
         cypressEx.getPathToExamples(),
-        scaffold.integration(this.integrationFolder, this.cfg)
+        scaffold.integration(this.integrationFolder, this.cfg),
       )
       .spread((exampleSpecs) => {
         return Promise.join(
           fs.statAsync(`${this.integrationFolder}/examples/actions.spec.js`).get('size'),
           fs.statAsync(exampleSpecs[0]).get('size'),
           fs.statAsync(`${this.integrationFolder}/examples/location.spec.js`).get('size'),
-          fs.statAsync(exampleSpecs[8]).get('size')
+          fs.statAsync(exampleSpecs[8]).get('size'),
         ).spread((size1, size2, size3, size4) => {
           expect(size1).to.eq(size2)
 
@@ -140,6 +140,21 @@ describe('lib/scaffold', () => {
 
     it('does not create any files if integrationFolder is not default', function () {
       this.cfg.resolved.integrationFolder.from = 'config'
+
+      return scaffold.integration(this.integrationFolder, this.cfg)
+      .then(() => {
+        return glob('**/*', { cwd: this.integrationFolder })
+      }).then((files) => {
+        expect(files.length).to.eq(0)
+      })
+    })
+
+    it('does not create any files if using component testing', function () {
+      this.cfg.resolved.componentFolder.from = 'config'
+      this.cfg.resolved.testingType = {
+        value: 'component',
+        from: 'default',
+      }
 
       return scaffold.integration(this.integrationFolder, this.cfg)
       .then(() => {
@@ -244,7 +259,7 @@ describe('lib/scaffold', () => {
       .then(() => {
         return Promise.join(
           fs.readFileAsync(`${this.supportFolder}/commands.js`, 'utf8'),
-          fs.readFileAsync(`${this.supportFolder}/index.js`, 'utf8')
+          fs.readFileAsync(`${this.supportFolder}/index.js`, 'utf8'),
         ).spread((commandsContents, indexContents) => {
           snapshot(commandsContents)
 
@@ -330,7 +345,7 @@ describe('lib/scaffold', () => {
   "name": "Using fixtures to represent data",
   "email": "hello@cypress.io",
   "body": "Fixtures are a great way to mock data for responses to routes"
-}\
+}
 `)
       })
     })
@@ -396,6 +411,12 @@ describe('lib/scaffold', () => {
     })
 
     it('returns tree-like structure of scaffolded', function () {
+      return scaffold.fileTree(this.cfg).then(snapshot)
+    })
+
+    it('leaves out integration tests if using component testing', function () {
+      this.cfg.resolved.componentFolder.from = 'config'
+
       return scaffold.fileTree(this.cfg).then(snapshot)
     })
 

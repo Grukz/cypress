@@ -1,8 +1,8 @@
 .reporter {
   .instruments-container {
-    .route-alias {
+    .route-alias-name {
       border-radius: 10px;
-      background-color: lighten(#FFB61C, 25%);
+      background-color: $yellow-medium;
       color: #777888;
       padding: 0px 5px;
       display: inline-block;
@@ -39,8 +39,12 @@
       }
     }
 
+    .call-count {
+      white-space: nowrap;
+    }
+
     .no-calls .call-count,
-    .no-responses .response-count {
+    .no-responses .route-num-responses {
       color: $fail;
     }
   }

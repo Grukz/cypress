@@ -15,35 +15,19 @@ The reporter shows the running results of the tests. It includes the following:
   - hooks
   - commands and assertions with detailed information
   - any failures/errors
-- Toggle-able auto-scrolling of command log
-
-## Installing
-
-The reporter's dependencies can be installed with:
-
-```bash
-cd packages/reporter
-npm install
-```
-
-The reporter may also require that dependencies by installed at the root of this repository:
-
-```bash
-npm install
-```
 
 ## Building
 
 ### For development
 
 ```bash
-npm run build
+yarn workspace @packages/reporter build
 ```
 
 ### For production
 
 ```bash
-npm run build-prod
+yarn workspace @packages/reporter build-prod
 ```
 
 ## Developing
@@ -53,32 +37,20 @@ To see the reporter render, see [Developing the driver](../driver/README.md#Deve
 ### Watching
 
 - Runs `*.js` and `*.jsx` through babel and bundles with browserify into single `dist/reporter.js`
-- Runs associated unit test of file saved and outputs to terminal
 - Compiles `*.scss` files to single `dist/reporter.css`
 
 ```bash
-npm run watch
+yarn workspace @packages/reporter watch
 ```
 
 ## Testing
 
-### Cypress
-
-Run Cypress tests found in `cypress/integration`. 
+Run Cypress tests found in `cypress/integration`.
 
 ```bash
-npm run cypress:open
+yarn workspace @packages/reporter cypress:open
 ```
 
-You'll want to run `npm run watch` in the `packages/reporter` to iterate on the reporter under test while testing.
+You'll want to run `yarn workspace @packages/reporter watch` to iterate on the reporter under test while testing.
 
-You'll want to run `npm run watch` in the `packages/runner` to get changes to the main Cypress reporter while testing.
-
-### Enzyme
-
-Run enzyme component tests found in `*.spec` files in `src`:
-
-```bash
-npm test
-```
-
+You'll want to run `yarn workspace @packages/runner watch` to get changes to the main Cypress reporter while testing.

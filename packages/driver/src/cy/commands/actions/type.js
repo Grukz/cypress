@@ -5,6 +5,7 @@ const $dom = require('../../../dom')
 const $elements = require('../../../dom/elements')
 const $selection = require('../../../dom/selection')
 const $utils = require('../../../cypress/utils')
+const $errUtils = require('../../../cypress/error_utils')
 const $actionability = require('../../actionability')
 const $Keyboard = require('../../../cy/keyboard')
 const debug = require('debug')('cypress:driver:command:type')
@@ -13,12 +14,12 @@ module.exports = function (Commands, Cypress, cy, state, config) {
   const { keyboard } = cy.devices
 
   function type (subject, chars, options = {}) {
+    const userOptions = options
     let updateTable
 
-    options = _.clone(options)
     // allow the el we're typing into to be
     // changed by options -- used by cy.clear()
-    _.defaults(options, {
+    options = _.defaults({}, userOptions, {
       $el: subject,
       log: true,
       verify: true,
@@ -28,6 +29,7 @@ module.exports = function (Commands, Cypress, cy, state, config) {
       parseSpecialCharSequences: true,
       waitForAnimations: config('waitForAnimations'),
       animationDistanceThreshold: config('animationDistanceThreshold'),
+      scrollBehavior: config('scrollBehavior'),
     })
 
     if (options.log) {
@@ -84,6 +86,7 @@ module.exports = function (Commands, Cypress, cy, state, config) {
       options._log = Cypress.log({
         message: [chars, deltaOptions],
         $el: options.$el,
+        timeout: options.timeout,
         consoleProps () {
           return {
             'Typed': chars,
@@ -107,21 +110,21 @@ module.exports = function (Commands, Cypress, cy, state, config) {
     }
 
     if (options.$el.length > 1) {
-      $utils.throwErrByPath('type.multiple_elements', {
+      $errUtils.throwErrByPath('type.multiple_elements', {
         onFail: options._log,
         args: { num: options.$el.length },
       })
     }
 
     if (!(_.isString(chars) || _.isFinite(chars))) {
-      $utils.throwErrByPath('type.wrong_type', {
+      $errUtils.throwErrByPath('type.wrong_type', {
         onFail: options._log,
         args: { chars },
       })
     }
 
     if (_.isString(chars) && _.isEmpty(chars)) {
-      $utils.throwErrByPath('type.empty_string', {
+      $errUtils.throwErrByPath('type.empty_string', {
         onFail: options._log,
         args: { chars },
       })
@@ -200,19 +203,25 @@ module.exports = function (Commands, Cypress, cy, state, config) {
           return
         }
 
-        // issue the click event to the 'default button' of the form
-        // we need this to be synchronous so not going through our
-        // own click command
-        // as of now, at least in Chrome, causing the click event
-        // on the button will indeed trigger the form submit event
-        // so we dont need to fire it manually anymore!
-        if (!clickedDefaultButton(defaultButton)) {
-          // if we werent able to click the default button
-          // then synchronously fire the submit event
-          // currently this is sync but if we use a waterfall
-          // promise in the submit command it will break again
-          // consider changing type to a Promise and juggle logging
-          return cy.now('submit', form, { log: false, $el: form })
+        // In Firefox, submit event is automatically fired
+        // when we send {Enter} KeyboardEvent to the input fields.
+        // Because of that, we don't have to click the submit buttons.
+        // Otherwise, we trigger submit events twice.
+        if (!Cypress.isBrowser('firefox')) {
+          // issue the click event to the 'default button' of the form
+          // we need this to be synchronous so not going through our
+          // own click command
+          // as of now, at least in Chrome, causing the click event
+          // on the button will indeed trigger the form submit event
+          // so we dont need to fire it manually anymore!
+          if (!clickedDefaultButton(defaultButton)) {
+            // if we werent able to click the default button
+            // then synchronously fire the submit event
+            // currently this is sync but if we use a waterfall
+            // promise in the submit command it will break again
+            // consider changing type to a Promise and juggle logging
+            return cy.now('submit', form, { log: false, $el: form })
+          }
         }
       }
 
@@ -335,10 +344,10 @@ module.exports = function (Commands, Cypress, cy, state, config) {
 
         onNoMatchingSpecialChars (chars, allChars) {
           if (chars === 'tab') {
-            return $utils.throwErrByPath('type.tab', { onFail: options._log })
+            $errUtils.throwErrByPath('type.tab', { onFail: options._log })
           }
 
-          return $utils.throwErrByPath('type.invalid', {
+          $errUtils.throwErrByPath('type.invalid', {
             onFail: options._log,
             args: { chars: `{${chars}}`, allChars },
           })
@@ -348,9 +357,12 @@ module.exports = function (Commands, Cypress, cy, state, config) {
 
     const handleFocused = function () {
       // if it's the body, don't need to worry about focus
-      const isBody = options.$el.is('body')
+      // (unless it can be modified i.e we're in designMode or contenteditable)
+      const isBody = options.$el.is('body') && !$elements.isContentEditable(options.$el[0])
 
       if (isBody) {
+        debug('typing into body')
+
         return type()
       }
 
@@ -404,18 +416,20 @@ module.exports = function (Commands, Cypress, cy, state, config) {
             errorOnSelect: false,
           })
           .then(() => {
-            if (!options.force && $elements.getActiveElByDocument($elToClick[0].ownerDocument) === null) {
+            let activeElement = $elements.getActiveElByDocument($elToClick)
+
+            if (!options.force && activeElement === null) {
               const node = $dom.stringify($elToClick)
               const onFail = options._log
 
               if ($dom.isTextLike($elToClick[0])) {
-                $utils.throwErrByPath('type.not_actionable_textlike', {
+                $errUtils.throwErrByPath('type.not_actionable_textlike', {
                   onFail,
                   args: { node },
                 })
               }
 
-              $utils.throwErrByPath('type.not_on_typeable_element', {
+              $errUtils.throwErrByPath('type.not_on_typeable_element', {
                 onFail,
                 args: { node },
               })
@@ -453,9 +467,14 @@ module.exports = function (Commands, Cypress, cy, state, config) {
   }
 
   function clear (subject, options = {}) {
-    _.defaults(options, {
+    const userOptions = options
+
+    options = _.defaults({}, userOptions, {
       log: true,
       force: false,
+      waitForAnimations: config('waitForAnimations'),
+      animationDistanceThreshold: config('animationDistanceThreshold'),
+      scrollBehavior: config('scrollBehavior'),
     })
 
     // blow up if any member of the subject
@@ -470,6 +489,7 @@ module.exports = function (Commands, Cypress, cy, state, config) {
         options._log = Cypress.log({
           message: deltaOptions,
           $el,
+          timeout: options.timeout,
           consoleProps () {
             return {
               'Applied To': $dom.getElements($el),
@@ -480,32 +500,65 @@ module.exports = function (Commands, Cypress, cy, state, config) {
         })
       }
 
-      const node = $dom.stringify($el)
+      const callTypeCmd = ($el) => {
+        return cy.now('type', $el, '{selectall}{del}', {
+          $el,
+          log: false,
+          verify: false, // handle verification ourselves
+          _log: options._log,
+          force: options.force,
+          timeout: options.timeout,
+          interval: options.interval,
+          waitForAnimations: options.waitForAnimations,
+          animationDistanceThreshold: options.animationDistanceThreshold,
+          scrollBehavior: options.scrollBehavior,
+        }).then(() => {
+          if (options._log) {
+            options._log.snapshot().end()
+          }
 
-      if (!$dom.isTextLike($el.get(0))) {
+          return null
+        })
+      }
+
+      const throwError = ($el) => {
+        const node = $dom.stringify($el)
         const word = $utils.plural(subject, 'contains', 'is')
 
-        $utils.throwErrByPath('clear.invalid_element', {
+        $errUtils.throwErrByPath('clear.invalid_element', {
           onFail: options._log,
           args: { word, node },
         })
       }
 
-      return cy.now('type', $el, '{selectall}{del}', {
-        $el,
-        log: false,
-        verify: false, // handle verification ourselves
-        _log: options._log,
-        force: options.force,
-        timeout: options.timeout,
-        interval: options.interval,
-      }).then(() => {
-        if (options._log) {
-          options._log.snapshot().end()
+      if (!$dom.isTextLike($el.get(0))) {
+        options.ensure = {
+          position: true,
+          visibility: true,
+          notDisabled: true,
+          notAnimating: true,
+          notCovered: true,
+          notReadonly: true,
         }
 
-        return null
-      })
+        return $actionability.verify(cy, $el, options, {
+          onScroll ($el, type) {
+            return Cypress.action('cy:scrolled', $el, type)
+          },
+
+          onReady ($elToClick) {
+            let activeElement = $elements.getActiveElByDocument($elToClick)
+
+            if (!options.force && activeElement === null || !$dom.isTextLike($elToClick.get(0))) {
+              throwError($el)
+            }
+
+            return callTypeCmd($elToClick)
+          },
+        })
+      }
+
+      return callTypeCmd($el)
     }
 
     return Promise
@@ -527,6 +580,6 @@ module.exports = function (Commands, Cypress, cy, state, config) {
     {
       type,
       clear,
-    }
+    },
   )
 }

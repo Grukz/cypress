@@ -1,9 +1,11 @@
 const _ = require('lodash')
 const la = require('lazy-ass')
-const debug = require('debug')('cypress:server:openproject')
+const debug = require('debug')('cypress:server:open_project')
 const Promise = require('bluebird')
 const chokidar = require('chokidar')
-const Project = require('./project')
+const pluralize = require('pluralize')
+const { ProjectCt } = require('@packages/server-ct/src/project-ct')
+const { ProjectE2E } = require('./project-e2e')
 const browsers = require('./browsers')
 const specsUtil = require('./util/specs')
 const preprocessor = require('./plugins/preprocessor')
@@ -30,11 +32,15 @@ const moduleFactory = () => {
   return {
     specsWatcher: null,
 
+    componentSpecsWatcher: null,
+
     reset: tryToCall('reset'),
 
     getConfig: tryToCall('getConfig'),
 
     createCiProject: tryToCall('createCiProject'),
+
+    writeProjectId: tryToCall('writeProjectId'),
 
     getRecordKeys: tryToCall('getRecordKeys'),
 
@@ -48,28 +54,36 @@ const moduleFactory = () => {
       return openProject
     },
 
+    changeUrlToSpec (spec) {
+      return openProject.getSpecUrl(spec.absolute, spec.specType)
+      .then((newSpecUrl) => openProject.changeToUrl(newSpecUrl))
+    },
+
     launch (browser, spec, options = {}) {
-      debug('resetting project state, preparing to launch browser')
+      debug('resetting project state, preparing to launch browser %s for spec %o options %o',
+        browser.name, spec, options)
 
       la(_.isPlainObject(browser), 'expected browser object:', browser)
 
       // reset to reset server and socket state because
       // of potential domain changes, request buffers, etc
       return this.reset()
-      .then(() => openProject.getSpecUrl(spec.absolute))
+      .then(() => openProject.getSpecUrl(spec.absolute, spec.specType))
       .then((url) => {
+        debug('open project url %s', url)
+
         return openProject.getConfig()
         .then((cfg) => {
-          options.browsers = cfg.browsers
-          options.proxyUrl = cfg.proxyUrl
-          options.userAgent = cfg.userAgent
-          options.proxyServer = cfg.proxyUrl
-          options.socketIoRoute = cfg.socketIoRoute
-          options.chromeWebSecurity = cfg.chromeWebSecurity
-
-          options.url = url
-
-          options.isTextTerminal = cfg.isTextTerminal
+          _.defaults(options, {
+            browsers: cfg.browsers,
+            userAgent: cfg.userAgent,
+            proxyUrl: cfg.proxyUrl,
+            proxyServer: cfg.proxyServer,
+            socketIoRoute: cfg.socketIoRoute,
+            chromeWebSecurity: cfg.chromeWebSecurity,
+            isTextTerminal: cfg.isTextTerminal,
+            downloadsFolder: cfg.downloadsFolder,
+          })
 
           // if we don't have the isHeaded property
           // then we're in interactive mode and we
@@ -83,6 +97,7 @@ const moduleFactory = () => {
           // set the current browser object on options
           // so we can pass it down
           options.browser = browser
+          options.url = url
 
           openProject.setCurrentSpecAndBrowser(spec, browser)
 
@@ -96,15 +111,17 @@ const moduleFactory = () => {
             automation.use(am)
           }
 
-          automation.use({
-            onBeforeRequest (message, data) {
-              if (message === 'take:screenshot') {
-                data.specName = spec.name
+          if (!am || !am.onBeforeRequest) {
+            automation.use({
+              onBeforeRequest (message, data) {
+                if (message === 'take:screenshot') {
+                  data.specName = spec.name
 
-                return data
-              }
-            },
-          })
+                  return data
+                }
+              },
+            })
+          }
 
           const { onBrowserClose } = options
 
@@ -118,11 +135,13 @@ const moduleFactory = () => {
             }
           }
 
+          options.onError = openProject.options.onError
+
           relaunchBrowser = () => {
             debug(
               'launching browser: %o, spec: %s',
               browser,
-              spec.relative
+              spec.relative,
             )
 
             return browsers.open(browser, options, automation)
@@ -130,6 +149,41 @@ const moduleFactory = () => {
 
           return relaunchBrowser()
         })
+      })
+    },
+
+    getSpecs (cfg) {
+      return specsUtil.find(cfg)
+      .then((specs = []) => {
+        // TODO merge logic with "run.js"
+        if (debug.enabled) {
+          const names = _.map(specs, 'name')
+
+          debug(
+            'found %s using spec pattern \'%s\': %o',
+            pluralize('spec', names.length, true),
+            cfg.testFiles,
+            names,
+          )
+        }
+
+        const componentTestingEnabled = _.get(cfg, 'resolved.testingType.value', 'e2e') === 'component'
+
+        if (componentTestingEnabled) {
+          // separate specs into integration and component lists
+          // note: _.remove modifies the array in place and returns removed elements
+          const component = _.remove(specs, { specType: 'component' })
+
+          return {
+            integration: specs,
+            component,
+          }
+        }
+
+        // assumes all specs are integration specs
+        return {
+          integration: specs,
+        }
       })
     },
 
@@ -166,21 +220,39 @@ const moduleFactory = () => {
       250, { leading: true })
 
       const createSpecsWatcher = (cfg) => {
-        if (this.specsWatcher) {
-          return
+        // TODO I keep repeating this to get the resolved value
+        // probably better to have a single function that does this
+        const componentTestingEnabled = _.get(cfg, 'resolved.testingType.value', 'e2e') === 'component'
+
+        debug('createSpecWatch component testing enabled', componentTestingEnabled)
+
+        if (!this.specsWatcher) {
+          debug('watching integration test files: %s in %s', cfg.testFiles, cfg.integrationFolder)
+
+          this.specsWatcher = chokidar.watch(cfg.testFiles, {
+            cwd: cfg.integrationFolder,
+            ignored: cfg.ignoreTestFiles,
+            ignoreInitial: true,
+          })
+
+          this.specsWatcher.on('add', checkForSpecUpdates)
+
+          this.specsWatcher.on('unlink', checkForSpecUpdates)
         }
 
-        debug('watch test files: %s in %s', cfg.testFiles, cfg.integrationFolder)
+        if (componentTestingEnabled && !this.componentSpecsWatcher) {
+          debug('watching component test files: %s in %s', cfg.testFiles, cfg.componentFolder)
 
-        this.specsWatcher = chokidar.watch(cfg.testFiles, {
-          cwd: cfg.integrationFolder,
-          ignored: cfg.ignoreTestFiles,
-          ignoreInitial: true,
-        })
+          this.componentSpecsWatcher = chokidar.watch(cfg.testFiles, {
+            cwd: cfg.componentFolder,
+            ignored: cfg.ignoreTestFiles,
+            ignoreInitial: true,
+          })
 
-        this.specsWatcher.on('add', checkForSpecUpdates)
+          this.componentSpecsWatcher.on('add', checkForSpecUpdates)
 
-        return this.specsWatcher.on('unlink', checkForSpecUpdates)
+          this.componentSpecsWatcher.on('unlink', checkForSpecUpdates)
+        }
       }
 
       const get = () => {
@@ -188,14 +260,7 @@ const moduleFactory = () => {
         .then((cfg) => {
           createSpecsWatcher(cfg)
 
-          return specsUtil.find(cfg)
-        })
-        // TODO: put back 'integration' property
-        // on the specs
-        .then((specs = []) => {
-          return {
-            integration: specs,
-          }
+          return this.getSpecs(cfg)
         })
       }
 
@@ -209,6 +274,11 @@ const moduleFactory = () => {
       if (this.specsWatcher) {
         this.specsWatcher.close()
         this.specsWatcher = null
+      }
+
+      if (this.componentSpecsWatcher) {
+        this.componentSpecsWatcher.close()
+        this.componentSpecsWatcher = null
       }
     },
 
@@ -241,7 +311,7 @@ const moduleFactory = () => {
       debug('and options %o', options)
 
       // store the currently open project
-      openProject = new Project(path)
+      openProject = args.testingType === 'component' ? new ProjectCt(path) : new ProjectE2E(path)
 
       _.defaults(options, {
         onReloadBrowser: () => {
@@ -255,14 +325,14 @@ const moduleFactory = () => {
         options.configFile = args.configFile
       }
 
-      options = _.extend({}, args.config, options)
+      options = _.extend({}, args.config, options, { args })
 
       // open the project and return
       // the config for the project instance
       debug('opening project %s', path)
       debug('and options %o', options)
 
-      return openProject.open(options)
+      return openProject.open({ ...options, testingType: args.testingType })
       .return(this)
     },
   }

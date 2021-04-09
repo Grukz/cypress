@@ -1,26 +1,28 @@
-import execa from 'execa'
-import { pathExists } from 'fs-extra'
-import { homedir } from 'os'
-import { join, normalize } from 'path'
-import { tap, trim } from 'ramda'
+import fse from 'fs-extra'
+import os from 'os'
+import { join, normalize, win32 } from 'path'
+import { tap, trim, prop } from 'ramda'
+import { get } from 'lodash'
 import { notInstalledErr } from '../errors'
 import { log } from '../log'
-import { Browser, FoundBrowser } from '../types'
+import { Browser, FoundBrowser, PathData } from '../types'
+import { utils } from '../utils'
 
 function formFullAppPath (name: string) {
-  const prefix = 'C:/Program Files (x86)/Google/Chrome/Application'
-
-  return normalize(join(prefix, `${name}.exe`))
+  return [
+    `C:/Program Files (x86)/Google/Chrome/Application/${name}.exe`,
+    `C:/Program Files/Google/Chrome/Application/${name}.exe`,
+  ].map(normalize)
 }
 
 function formChromiumAppPath () {
   const exe = 'C:/Program Files (x86)/Google/chrome-win32/chrome.exe'
 
-  return normalize(exe)
+  return [normalize(exe)]
 }
 
 function formChromeCanaryAppPath () {
-  const home = homedir()
+  const home = os.homedir()
   const exe = join(
     home,
     'AppData',
@@ -28,28 +30,79 @@ function formChromeCanaryAppPath () {
     'Google',
     'Chrome SxS',
     'Application',
-    'chrome.exe'
+    'chrome.exe',
   )
 
-  return normalize(exe)
+  return [normalize(exe)]
 }
 
-type NameToPath = (name: string) => string
+function getFirefoxPaths (editionFolder) {
+  return () => {
+    return (['Program Files', 'Program Files (x86)'])
+    .map((programFiles) => {
+      return normalize(`C:/${programFiles}/${editionFolder}/firefox.exe`)
+    })
+    .concat(normalize(join(
+      os.homedir(),
+      'AppData',
+      'Local',
+      editionFolder,
+      'firefox.exe',
+    )))
+  }
+}
 
-interface WindowsBrowserPaths {
-  [index: string]: NameToPath
-  chrome: NameToPath
-  canary: NameToPath
-  chromium: NameToPath
+function formEdgeCanaryAppPath () {
+  const home = os.homedir()
+  const exe = join(
+    home,
+    'AppData',
+    'Local',
+    'Microsoft',
+    'Edge SxS',
+    'Application',
+    'msedge.exe',
+  )
+
+  return [normalize(exe)]
+}
+
+type NameToPath = (name: string) => string[]
+
+type WindowsBrowserPaths = {
+  [name: string]: {
+    [channel: string]: NameToPath
+  }
 }
 
 const formPaths: WindowsBrowserPaths = {
-  chrome: formFullAppPath,
-  canary: formChromeCanaryAppPath,
-  chromium: formChromiumAppPath,
+  chrome: {
+    stable: formFullAppPath,
+    canary: formChromeCanaryAppPath,
+  },
+  chromium: {
+    stable: formChromiumAppPath,
+  },
+  firefox: {
+    stable: getFirefoxPaths('Mozilla Firefox'),
+    dev: getFirefoxPaths('Firefox Developer Edition'),
+    nightly: getFirefoxPaths('Firefox Nightly'),
+  },
+  edge: {
+    stable: () => {
+      return [normalize('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe')]
+    },
+    beta: () => {
+      return [normalize('C:/Program Files (x86)/Microsoft/Edge Beta/Application/msedge.exe')]
+    },
+    dev: () => {
+      return [normalize('C:/Program Files (x86)/Microsoft/Edge Dev/Application/msedge.exe')]
+    },
+    canary: formEdgeCanaryAppPath,
+  },
 }
 
-function getWindowsBrowser (name: string): Promise<FoundBrowser> {
+function getWindowsBrowser (browser: Browser): Promise<FoundBrowser> {
   const getVersion = (stdout: string): string => {
     // result from wmic datafile
     // "Version=61.0.3163.100"
@@ -61,60 +114,121 @@ function getWindowsBrowser (name: string): Promise<FoundBrowser> {
     }
 
     log('Could not extract version from %s using regex %s', stdout, wmicVersion)
-    throw notInstalledErr(name)
+    throw notInstalledErr(browser.name)
   }
 
-  const formFullAppPathFn: any = formPaths[name] || formFullAppPath
-  const exePath = formFullAppPathFn(name)
+  const formFullAppPathFn: NameToPath = get(formPaths, [browser.name, browser.channel], formFullAppPath)
 
-  log('exe path %s', exePath)
+  const exePaths = formFullAppPathFn(browser.name)
 
-  return pathExists(exePath)
-  .then((exists) => {
-    log('found %s ?', exePath, exists)
+  log('looking at possible paths... %o', { browser, exePaths })
 
-    if (!exists) {
-      throw notInstalledErr(`Browser ${name} file not found at ${exePath}`)
+  // shift and try paths 1-by-1 until we find one that works
+  const tryNextExePath = async () => {
+    const exePath = exePaths.shift()
+
+    if (!exePath) {
+      // exhausted available paths
+      throw notInstalledErr(browser.name)
     }
 
-    return getVersionString(exePath)
-    .then(tap(log))
-    .then(getVersion)
-    .then((version: string) => {
-      log('browser %s at \'%s\' version %s', name, exePath, version)
+    let path = doubleEscape(exePath)
 
-      return {
-        name,
-        version,
-        path: exePath,
-      } as FoundBrowser
+    return fse.pathExists(path)
+    .then((exists) => {
+      log('found %s ?', path, exists)
+
+      if (!exists) {
+        return tryNextExePath()
+      }
+
+      return getVersionString(path)
+      .then(tap(log))
+      .then(getVersion)
+      .then((version: string) => {
+        log('browser %s at \'%s\' version %s', browser.name, exePath, version)
+
+        return {
+          name: browser.name,
+          version,
+          path: exePath,
+        } as FoundBrowser
+      })
     })
-  })
-  .catch(() => {
-    throw notInstalledErr(name)
-  })
+    .catch((err) => {
+      log('error while looking up exe, trying next exePath %o', { exePath, exePaths, err })
+
+      return tryNextExePath()
+    })
+  }
+
+  return tryNextExePath()
+}
+
+export function doubleEscape (s: string) {
+  // Converts all types of paths into windows supported double backslash path
+  // Handles any number of \\ in the given path
+  return win32.join(...s.split(win32.sep)).replace(/\\/g, '\\\\')
 }
 
 export function getVersionString (path: string) {
-  const doubleEscape = (s: string) => s.replace(/\\/g, '\\\\')
-
   // on Windows using "--version" seems to always start the full
   // browser, no matter what one does.
 
   const args = [
     'datafile',
     'where',
-    `name="${doubleEscape(path)}"`,
+    `name="${path}"`,
     'get',
     'Version',
     '/value',
   ]
 
-  return execa('wmic', args)
-  .then((result) => result.stdout)
+  return utils.execa('wmic', args)
+  .then(prop('stdout'))
   .then(trim)
 }
 
+export function getVersionNumber (version: string) {
+  if (version.indexOf('Version=') > -1) {
+    return version.split('=')[1]
+  }
+
+  return version
+}
+
+export function getPathData (pathStr: string): PathData {
+  const test = new RegExp(/^.+\.exe:(.+)$/)
+  const res = test.exec(pathStr)
+  let browserKey = ''
+  let path = pathStr
+
+  if (res) {
+    const pathParts = path.split(':')
+
+    browserKey = pathParts.pop() || ''
+    path = doubleEscape(pathParts.join(':'))
+
+    return { path, browserKey }
+  }
+
+  path = doubleEscape(path)
+
+  if (pathStr.indexOf('chrome.exe') > -1) {
+    return { path, browserKey: 'chrome' }
+  }
+
+  if (pathStr.indexOf('edge.exe') > -1) {
+    return { path, browserKey: 'edge' }
+  }
+
+  if (pathStr.indexOf('firefox.exe') > -1) {
+    return { path, browserKey: 'firefox' }
+  }
+
+  return { path }
+}
+
 export function detect (browser: Browser) {
-  return getWindowsBrowser(browser.name)
+  return getWindowsBrowser(browser)
 }

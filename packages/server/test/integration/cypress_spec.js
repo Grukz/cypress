@@ -13,15 +13,16 @@ const snapshot = require('snap-shot-it')
 const stripAnsi = require('strip-ansi')
 const debug = require('debug')('test')
 const pkg = require('@packages/root')
-const launcher = require('@packages/launcher')
+const detect = require('@packages/launcher/lib/detect')
+const launch = require('@packages/launcher/lib/browsers')
 const extension = require('@packages/extension')
 const argsUtil = require(`${root}lib/util/args`)
-const fs = require(`${root}lib/util/fs`)
+const { fs } = require(`${root}lib/util/fs`)
 const ciProvider = require(`${root}lib/util/ci_provider`)
 const settings = require(`${root}lib/util/settings`)
 const Events = require(`${root}lib/gui/events`)
 const Windows = require(`${root}lib/gui/windows`)
-const interactiveMode = require(`${root}lib/modes/interactive`)
+const interactiveMode = require(`${root}lib/modes/interactive-e2e`)
 const runMode = require(`${root}lib/modes/run`)
 const api = require(`${root}lib/api`)
 const cwd = require(`${root}lib/cwd`)
@@ -31,8 +32,9 @@ const cache = require(`${root}lib/cache`)
 const errors = require(`${root}lib/errors`)
 const plugins = require(`${root}lib/plugins`)
 const cypress = require(`${root}lib/cypress`)
-const Project = require(`${root}lib/project`)
-const Server = require(`${root}lib/server`)
+const { ProjectBase } = require(`${root}lib/project-base`)
+const { ProjectE2E } = require(`${root}lib/project-e2e`)
+const { ServerE2E } = require(`${root}lib/server-e2e`)
 const Reporter = require(`${root}lib/reporter`)
 const Watchers = require(`${root}lib/watchers`)
 const browsers = require(`${root}lib/browsers`)
@@ -44,26 +46,30 @@ const env = require(`${root}lib/util/env`)
 const v = require(`${root}lib/util/validation`)
 const system = require(`${root}lib/util/system`)
 const appData = require(`${root}lib/util/app_data`)
-const { formStatePath } = require(`${root}lib/util/saved_state`)
+const electronApp = require('../../lib/util/electron-app')
+const savedState = require(`${root}lib/saved_state`)
 
 const TYPICAL_BROWSERS = [
   {
     name: 'chrome',
-    family: 'chrome',
+    family: 'chromium',
+    channel: 'stable',
     displayName: 'Chrome',
     version: '60.0.3112.101',
     path: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     majorVersion: '60',
   }, {
     name: 'chromium',
-    family: 'chrome',
+    family: 'chromium',
+    channel: 'stable',
     displayName: 'Chromium',
     version: '49.0.2609.0',
     path: '/Users/bmann/Downloads/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
     majorVersion: '49',
   }, {
-    name: 'canary',
-    family: 'chrome',
+    name: 'chrome',
+    family: 'chromium',
+    channel: 'canary',
     displayName: 'Canary',
     version: '62.0.3197.0',
     path: '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
@@ -73,7 +79,7 @@ const TYPICAL_BROWSERS = [
 
 const ELECTRON_BROWSER = {
   name: 'electron',
-  family: 'electron',
+  family: 'chromium',
   displayName: 'Electron',
   path: '',
   version: '99.101.1234',
@@ -84,7 +90,7 @@ const previousCwd = process.cwd()
 
 const snapshotConsoleLogs = function (name) {
   const args = _
-  .chain(console.log.args) // eslint-disable-line no-console
+  .chain(console.log.args)
   .map((innerArgs) => {
     return innerArgs.join(' ')
   }).join('\n')
@@ -101,7 +107,7 @@ describe('lib/cypress', () => {
   require('mocha-banner').register()
 
   beforeEach(function () {
-    this.timeout(5000)
+    this.timeout(8000)
 
     cache.__removeSync()
 
@@ -118,11 +124,11 @@ describe('lib/cypress', () => {
     // spawning a separate process
     sinon.stub(videoCapture, 'start').resolves({})
     sinon.stub(plugins, 'init').resolves(undefined)
-    sinon.stub(cypress, 'isCurrentlyRunningElectron').returns(true)
+    sinon.stub(electronApp, 'isRunning').returns(true)
     sinon.stub(extension, 'setHostAndPath').resolves()
-    sinon.stub(launcher, 'detect').resolves(TYPICAL_BROWSERS)
+    sinon.stub(detect, 'detect').resolves(TYPICAL_BROWSERS)
     sinon.stub(process, 'exit')
-    sinon.stub(Server.prototype, 'reset')
+    sinon.stub(ServerE2E.prototype, 'reset')
     sinon.stub(errors, 'warning')
     .callThrough()
     .withArgs('INVOKED_BINARY_OUTSIDE_NPM_MODULE')
@@ -133,20 +139,31 @@ describe('lib/cypress', () => {
     sinon.spy(console, 'log')
 
     // to make sure our Electron browser mock object passes validation during tests
-    process.versions.chrome = ELECTRON_BROWSER.version
+    sinon.stub(process, 'versions').value({
+      chrome: ELECTRON_BROWSER.version,
+      electron: '123.45.6789',
+    })
 
     this.expectExitWith = (code) => {
       expect(process.exit).to.be.calledWith(code)
     }
 
-    this.expectExitWithErr = (type, msg) => {
-      expect(errors.log).to.be.calledWithMatch({ type })
-      expect(process.exit).to.be.calledWith(1)
-      if (msg) {
-        const err = errors.log.getCall(0).args[0]
+    // returns error object
+    this.expectExitWithErr = (type, msg1, msg2) => {
+      expect(errors.log, 'error was logged').to.be.calledWithMatch({ type })
+      expect(process.exit, 'process.exit was called').to.be.calledWith(1)
 
-        expect(err.message).to.include(msg)
+      const err = errors.log.getCall(0).args[0]
+
+      if (msg1) {
+        expect(err.message, 'error text').to.include(msg1)
       }
+
+      if (msg2) {
+        expect(err.message, 'second error text').to.include(msg2)
+      }
+
+      return err
     }
   })
 
@@ -155,7 +172,11 @@ describe('lib/cypress', () => {
 
     // make sure every project
     // we spawn is closed down
-    return openProject.close()
+    try {
+      return openProject.close()
+    } catch (e) {
+      // ...
+    }
   })
 
   context('test browsers', () => {
@@ -172,7 +193,7 @@ describe('lib/cypress', () => {
     it('allows browser major to be a number', () => {
       const browser = {
         name: 'Edge Beta',
-        family: 'chrome',
+        family: 'chromium',
         displayName: 'Edge Beta',
         version: '80.0.328.2',
         path: '/some/path',
@@ -189,12 +210,83 @@ describe('lib/cypress', () => {
     })
   })
 
+  context('error handling', function () {
+    it('exits if config cannot be parsed', function () {
+      return cypress.start(['--config', 'xyz'])
+      .then(() => {
+        const err = this.expectExitWithErr('COULD_NOT_PARSE_ARGUMENTS')
+
+        snapshot('could not parse config error', stripAnsi(err.message))
+      })
+    })
+
+    it('exits if env cannot be parsed', function () {
+      return cypress.start(['--env', 'a123'])
+      .then(() => {
+        const err = this.expectExitWithErr('COULD_NOT_PARSE_ARGUMENTS')
+
+        snapshot('could not parse env error', stripAnsi(err.message))
+      })
+    })
+
+    it('exits if reporter options cannot be parsed', function () {
+      return cypress.start(['--reporterOptions', 'nonono'])
+      .then(() => {
+        const err = this.expectExitWithErr('COULD_NOT_PARSE_ARGUMENTS')
+
+        snapshot('could not parse reporter options error', stripAnsi(err.message))
+      })
+    })
+  })
+
+  context('invalid config', function () {
+    beforeEach(function () {
+      this.win = {
+        on: sinon.stub(),
+        webContents: {
+          on: sinon.stub(),
+        },
+      }
+
+      sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
+      sinon.stub(Windows, 'open').resolves(this.win)
+    })
+
+    it('shows warning if config is not valid', function () {
+      return cypress.start(['--config=test=false', '--cwd=/foo/bar'])
+      .then(() => {
+        expect(errors.warning).to.be.calledWith('INVALID_CONFIG_OPTION')
+        expect(console.log).to.be.calledWithMatch('`test` is not a valid configuration option')
+        expect(console.log).to.be.calledWithMatch('https://on.cypress.io/configuration')
+      })
+    })
+
+    it('shows warning when multiple config are not valid', function () {
+      return cypress.start(['--config=test=false,foo=bar', '--cwd=/foo/bar'])
+      .then(() => {
+        expect(errors.warning).to.be.calledWith('INVALID_CONFIG_OPTION')
+        expect(console.log).to.be.calledWithMatch('`test` is not a valid configuration option')
+        expect(console.log).to.be.calledWithMatch('`foo` is not a valid configuration option')
+        expect(console.log).to.be.calledWithMatch('https://on.cypress.io/configuration')
+
+        snapshotConsoleLogs('INVALID_CONFIG_OPTION')
+      })
+    })
+
+    it('does not show warning if config is valid', function () {
+      return cypress.start(['--config=trashAssetsBeforeRuns=false'])
+      .then(() => {
+        expect(errors.warning).to.not.be.calledWith('INVALID_CONFIG_OPTION')
+      })
+    })
+  })
+
   context('--get-key', () => {
     it('writes out key and exits on success', function () {
       return Promise.all([
         user.set({ name: 'brian', authToken: 'auth-token-123' }),
 
-        Project.id(this.todosPath)
+        ProjectBase.id(this.todosPath)
         .then((id) => {
           this.projectId = id
         }),
@@ -206,7 +298,6 @@ describe('lib/cypress', () => {
 
         return cypress.start(['--get-key', `--project=${this.todosPath}`])
       }).then(() => {
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWith('new-key-123')
         this.expectExitWith(0)
       })
@@ -243,7 +334,7 @@ describe('lib/cypress', () => {
       return Promise.all([
         user.set({ authToken: 'auth-token-123' }),
 
-        Project.id(this.todosPath)
+        ProjectBase.id(this.todosPath)
         .then((id) => {
           this.projectId = id
         }),
@@ -265,7 +356,7 @@ describe('lib/cypress', () => {
       return Promise.all([
         user.set({ name: 'brian', authToken: 'auth-token-123' }),
 
-        Project.id(this.todosPath)
+        ProjectBase.id(this.todosPath)
         .then((id) => {
           this.projectId = id
         }),
@@ -277,7 +368,6 @@ describe('lib/cypress', () => {
 
         return cypress.start(['--new-key', `--project=${this.todosPath}`])
       }).then(() => {
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWith('new-key-123')
         this.expectExitWith(0)
       })
@@ -314,7 +404,7 @@ describe('lib/cypress', () => {
       return Promise.all([
         user.set({ authToken: 'auth-token-123' }),
 
-        Project.id(this.todosPath)
+        ProjectBase.id(this.todosPath)
         .then((id) => {
           this.projectId = id
         }),
@@ -334,7 +424,7 @@ describe('lib/cypress', () => {
   context('--run-project', () => {
     beforeEach(() => {
       sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
-      sinon.stub(runMode, 'waitForSocketConnection')
+      sinon.stub(runMode, 'waitForSocketConnection').resolves()
       sinon.stub(runMode, 'listenForProjectEnd').resolves({ stats: { failures: 0 } })
       sinon.stub(browsers, 'open')
       sinon.stub(commitInfo, 'getRemoteOrigin').resolves('remoteOrigin')
@@ -418,7 +508,7 @@ describe('lib/cypress', () => {
       }).then(() => {
         expect(api.createProject).not.to.be.called
 
-        return (new Project(this.noScaffolding)).getProjectId()
+        return (new ProjectBase(this.noScaffolding)).getProjectId()
         .then(() => {
           throw new Error('should have caught error but did not')
         }).catch((err) => {
@@ -518,7 +608,7 @@ describe('lib/cypress', () => {
           return Promise.join(
             fs.statAsync(path.join(cfg.integrationFolder, 'examples', 'actions.spec.js')),
             fs.statAsync(path.join(cfg.integrationFolder, 'examples', 'files.spec.js')),
-            fs.statAsync(path.join(cfg.integrationFolder, 'examples', 'viewport.spec.js'))
+            fs.statAsync(path.join(cfg.integrationFolder, 'examples', 'viewport.spec.js')),
           )
         })
       })
@@ -599,7 +689,7 @@ describe('lib/cypress', () => {
     })
 
     it('removes fixtures when they exist and fixturesFolder is false', function (done) {
-      return config.get(this.idsPath)
+      config.get(this.idsPath)
       .then((cfg) => {
         this.cfg = cfg
 
@@ -687,11 +777,8 @@ describe('lib/cypress', () => {
       return cypress.start([`--run-project=${this.todosPath}`, '--key=asdf'])
       .then(() => {
         expect(errors.warning).to.be.calledWith('PROJECT_ID_AND_KEY_BUT_MISSING_RECORD_OPTION', 'abc123')
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('You also provided your Record Key, but you did not pass the --record flag.')
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('cypress run --record')
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('https://on.cypress.io/recording-project-runs')
       })
     })
@@ -704,9 +791,7 @@ describe('lib/cypress', () => {
       return cypress.start([`--run-project=${this.todosPath}`])
       .then(() => {
         expect(errors.warning).to.be.calledWith('CANNOT_REMOVE_OLD_BROWSER_PROFILES', err.stack)
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('Warning: We failed to remove old browser profiles from previous runs.')
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch(err.message)
       })
     })
@@ -715,7 +800,6 @@ describe('lib/cypress', () => {
       return cypress.start([`--run-project=${this.pristinePath}`, '--key=asdf'])
       .then(() => {
         expect(errors.warning).not.to.be.calledWith('PROJECT_ID_AND_KEY_BUT_MISSING_RECORD_OPTION', 'abc123')
-        // eslint-disable-next-line no-console
         expect(console.log).not.to.be.calledWithMatch('cypress run --key <record_key>')
       })
     })
@@ -724,7 +808,6 @@ describe('lib/cypress', () => {
       return cypress.start([`--run-project=${this.todosPath}`, '--key=asdf', '--record=false'])
       .then(() => {
         expect(errors.warning).not.to.be.calledWith('PROJECT_ID_AND_KEY_BUT_MISSING_RECORD_OPTION', 'abc123')
-        // eslint-disable-next-line no-console
         expect(console.log).not.to.be.calledWithMatch('cypress run --key <record_key>')
       })
     })
@@ -751,7 +834,7 @@ describe('lib/cypress', () => {
         const found1 = _.find(argsSet, (args) => {
           return _.find(args, (arg) => {
             return arg.message && arg.message.includes(
-              'Browser: \'foo\' was not found on your system.'
+              'Browser: \'foo\' was not found on your system or is not supported by Cypress.',
             )
           })
         })
@@ -761,41 +844,59 @@ describe('lib/cypress', () => {
         const found2 = _.find(argsSet, (args) => {
           return _.find(args, (arg) => {
             return arg.message && arg.message.includes(
-              'Available browsers found are: chrome, chromium, canary, electron'
+              'Cypress supports the following browsers:',
             )
           })
         })
 
-        expect(found2, 'browser names should be listed').to.be.ok
+        expect(found2, 'supported browsers should be listed').to.be.ok
+
+        const found3 = _.find(argsSet, (args) => {
+          return _.find(args, (arg) => {
+            return arg.message && arg.message.includes(
+              'Available browsers found on your system are:\n- chrome\n- chromium\n- chrome:canary\n- electron',
+            )
+          })
+        })
+
+        expect(found3, 'browser names should be listed').to.be.ok
       })
     })
 
-    it('logs error and exits when spec file was specified and does not exist', function () {
-      return cypress.start([`--run-project=${this.todosPath}`, '--spec=path/to/spec'])
-      .then(() => {
-        this.expectExitWithErr('NO_SPECS_FOUND', 'path/to/spec')
-        this.expectExitWithErr('NO_SPECS_FOUND', 'We searched for any files matching this glob pattern:')
+    describe('no specs found', function () {
+      it('logs error and exits when spec file was specified and does not exist', function () {
+        return cypress.start([`--run-project=${this.todosPath}`, '--spec=path/to/spec'])
+        .then(() => {
+          // includes the search spec
+          this.expectExitWithErr('NO_SPECS_FOUND', 'path/to/spec')
+          this.expectExitWithErr('NO_SPECS_FOUND', 'We searched for any files matching this glob pattern:')
+          // includes the project path
+          this.expectExitWithErr('NO_SPECS_FOUND', this.todosPath)
+        })
       })
-    })
 
-    it('logs error and exits when spec absolute file was specified and does not exist', function () {
-      return cypress.start([
-        `--run-project=${this.todosPath}`,
-        `--spec=${this.todosPath}/tests/path/to/spec`,
-      ])
-      .then(() => {
-        this.expectExitWithErr('NO_SPECS_FOUND', 'tests/path/to/spec')
+      it('logs error and exits when spec absolute file was specified and does not exist', function () {
+        return cypress.start([
+          `--run-project=${this.todosPath}`,
+          `--spec=${this.todosPath}/tests/path/to/spec`,
+        ])
+        .then(() => {
+          // includes path to the spec
+          this.expectExitWithErr('NO_SPECS_FOUND', 'tests/path/to/spec')
+          // includes folder name
+          this.expectExitWithErr('NO_SPECS_FOUND', this.todosPath)
+        })
       })
-    })
 
-    it('logs error and exits when no specs were found at all', function () {
-      return cypress.start([
-        `--run-project=${this.todosPath}`,
-        '--config=integrationFolder=cypress/specs',
-      ])
-      .then(() => {
-        this.expectExitWithErr('NO_SPECS_FOUND', 'We searched for any files inside of this folder:')
-        this.expectExitWithErr('NO_SPECS_FOUND', 'cypress/specs')
+      it('logs error and exits when no specs were found at all', function () {
+        return cypress.start([
+          `--run-project=${this.todosPath}`,
+          '--config=integrationFolder=cypress/specs',
+        ])
+        .then(() => {
+          this.expectExitWithErr('NO_SPECS_FOUND', 'We searched for any files inside of this folder:')
+          this.expectExitWithErr('NO_SPECS_FOUND', 'cypress/specs')
+        })
       })
     })
 
@@ -847,36 +948,23 @@ describe('lib/cypress', () => {
       })
     })
 
-    it('logs error and exits when using an old configuration option: trashAssetsBeforeHeadlessRuns', function () {
-      return cypress.start([
-        `--run-project=${this.todosPath}`,
-        '--config=trashAssetsBeforeHeadlessRuns=false',
-      ])
-      .then(() => {
-        this.expectExitWithErr('RENAMED_CONFIG_OPTION', 'trashAssetsBeforeHeadlessRuns')
-        this.expectExitWithErr('RENAMED_CONFIG_OPTION', 'trashAssetsBeforeRuns')
-      })
-    })
+    const renamedConfigs = [
+      {
+        old: 'blacklistHosts',
+        new: 'blockHosts',
+      },
+    ]
 
-    it('logs error and exits when using an old configuration option: videoRecording', function () {
-      return cypress.start([
-        `--run-project=${this.todosPath}`,
-        '--config=videoRecording=false',
-      ])
-      .then(() => {
-        this.expectExitWithErr('RENAMED_CONFIG_OPTION', 'videoRecording')
-        this.expectExitWithErr('RENAMED_CONFIG_OPTION', 'video')
-      })
-    })
-
-    it('logs error and exits when using screenshotOnHeadlessFailure', function () {
-      return cypress.start([
-        `--run-project=${this.todosPath}`,
-        '--config=screenshotOnHeadlessFailure=false',
-      ])
-      .then(() => {
-        this.expectExitWithErr('SCREENSHOT_ON_HEADLESS_FAILURE_REMOVED', 'screenshotOnHeadlessFailure')
-        this.expectExitWithErr('SCREENSHOT_ON_HEADLESS_FAILURE_REMOVED', 'You now configure this behavior in your test code')
+    renamedConfigs.forEach(function (config) {
+      it(`logs error and exits when using an old configuration option: ${config.old}`, function () {
+        return cypress.start([
+          `--run-project=${this.todosPath}`,
+          `--config=${config.old}=''`,
+        ])
+        .then(() => {
+          this.expectExitWithErr('RENAMED_CONFIG_OPTION', config.old)
+          this.expectExitWithErr('RENAMED_CONFIG_OPTION', config.new)
+        })
       })
     })
 
@@ -920,7 +1008,7 @@ describe('lib/cypress', () => {
       beforeEach(function () {
         return appData.remove()
         .then(() => {
-          return formStatePath(this.todosPath)
+          return savedState.formStatePath(this.todosPath)
         }).then((statePathStart) => {
           this.statePath = appData.projectsPath(statePathStart)
         })
@@ -1049,15 +1137,21 @@ describe('lib/cypress', () => {
             attach: sinon.stub(),
             sendCommand: sinon.stub().resolves(),
           },
+          getOSProcessId: sinon.stub(),
           setUserAgent: sinon.stub(),
           session: {
             clearCache: sinon.stub().resolves(),
             setProxy: sinon.stub().resolves(),
             setUserAgent: sinon.stub(),
+            on: sinon.stub(),
+            removeListener: sinon.stub(),
           },
         }
 
-        sinon.stub(browserUtils, 'launch').resolves(ee)
+        ee.maximize = sinon.stub
+        ee.setSize = sinon.stub
+
+        sinon.stub(launch, 'launch').resolves(ee)
         sinon.stub(Windows, 'create').returns(ee)
       })
 
@@ -1068,13 +1162,18 @@ describe('lib/cypress', () => {
           const criClient = {
             ensureMinimumProtocolVersion: sinon.stub().resolves(),
             close: sinon.stub().resolves(),
+            on: sinon.stub(),
+            send: sinon.stub(),
           }
+
+          sinon.stub(chromeBrowser, '_writeExtension').resolves()
 
           sinon.stub(chromeBrowser, '_connectToChromeRemoteInterface').resolves(criClient)
           // the "returns(resolves)" stub is due to curried method
           // it accepts URL to visit and then waits for actual CRI client reference
           // and only then navigates to that URL
           sinon.stub(chromeBrowser, '_navigateUsingCRI').resolves()
+          sinon.stub(chromeBrowser, '_handleDownloads').resolves()
 
           sinon.stub(chromeBrowser, '_setAutomation').returns()
 
@@ -1083,7 +1182,7 @@ describe('lib/cypress', () => {
             '--browser=chrome',
           ])
           .then(() => {
-            const { args } = browserUtils.launch.firstCall
+            const { args } = launch.launch.firstCall
 
             // when we work with the browsers we set a few extra flags
             const chrome = _.find(TYPICAL_BROWSERS, { name: 'chrome' })
@@ -1096,9 +1195,7 @@ describe('lib/cypress', () => {
 
             const browserArgs = args[2]
 
-            expect(browserArgs, 'two arguments to Chrome').to.have.length(7)
-
-            expect(browserArgs.slice(0, 4), 'arguments to Chrome').to.deep.eq([
+            expect(browserArgs.slice(0, 4), 'first 4 custom launch arguments to Chrome').to.deep.eq([
               'chrome', 'foo', 'bar', 'baz',
             ])
 
@@ -1125,7 +1222,7 @@ describe('lib/cypress', () => {
               browser: 'electron',
               foo: 'bar',
               onNewWindow: sinon.match.func,
-              onPaint: sinon.match.func,
+              onScreencastFrame: sinon.match.func,
             })
 
             this.expectExitWith(0)
@@ -1139,15 +1236,15 @@ describe('lib/cypress', () => {
         return runMode.listenForProjectEnd.resolves({ stats: { failures: 0 } })
       })
 
-      it('can change the default port to 5555', function () {
+      it('can change the default port to 5544', function () {
         const listen = sinon.spy(http.Server.prototype, 'listen')
-        const open = sinon.spy(Server.prototype, 'open')
+        const open = sinon.spy(ServerE2E.prototype, 'open')
 
-        return cypress.start([`--run-project=${this.todosPath}`, '--port=5555'])
+        return cypress.start([`--run-project=${this.todosPath}`, '--port=5544'])
         .then(() => {
-          expect(openProject.getProject().cfg.port).to.eq(5555)
-          expect(listen).to.be.calledWith(5555)
-          expect(open).to.be.calledWithMatch({ port: 5555 })
+          expect(openProject.getProject().cfg.port).to.eq(5544)
+          expect(listen).to.be.calledWith(5544)
+          expect(open).to.be.calledWithMatch({ port: 5544 })
           this.expectExitWith(0)
         })
       })
@@ -1158,11 +1255,11 @@ describe('lib/cypress', () => {
 
         server = Promise.promisifyAll(server)
 
-        return server.listenAsync(5555, '127.0.0.1')
+        return server.listenAsync(5544, '127.0.0.1')
         .then(() => {
-          return cypress.start([`--run-project=${this.todosPath}`, '--port=5555'])
+          return cypress.start([`--run-project=${this.todosPath}`, '--port=5544'])
         }).then(() => {
-          this.expectExitWithErr('PORT_IN_USE_LONG', '5555')
+          this.expectExitWithErr('PORT_IN_USE_LONG', '5544')
         })
       })
     })
@@ -1250,12 +1347,12 @@ describe('lib/cypress', () => {
 
   // most record mode logic is covered in e2e tests.
   // we only need to cover the edge cases / warnings
-  context('--record or --ci', () => {
+  context('--record', () => {
     beforeEach(function () {
       sinon.stub(api, 'createRun').resolves()
       sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
       sinon.stub(browsers, 'open')
-      sinon.stub(runMode, 'waitForSocketConnection')
+      sinon.stub(runMode, 'waitForSocketConnection').resolves()
       sinon.stub(runMode, 'waitForTestsToFinishRunning').resolves({
         stats: {
           tests: 1,
@@ -1278,7 +1375,7 @@ describe('lib/cypress', () => {
         // make sure we have no user object
         user.set({}),
 
-        Project.id(this.todosPath)
+        ProjectBase.id(this.todosPath)
         .then((id) => {
           this.projectId = id
         }),
@@ -1318,45 +1415,6 @@ describe('lib/cypress', () => {
         })
 
         expect(errors.warning).not.to.be.called
-        this.expectExitWith(3)
-      })
-    })
-
-    it('logs warning when using deprecated --ci arg and no env var', function () {
-      return cypress.start([
-        `--run-project=${this.recordPath}`,
-        '--key=token-123',
-        '--ci',
-      ])
-      .then(() => {
-        expect(errors.warning).to.be.calledWith('CYPRESS_CI_DEPRECATED')
-        // eslint-disable-next-line no-console
-        expect(console.log).to.be.calledWithMatch('You are using the deprecated command:')
-        // eslint-disable-next-line no-console
-        expect(console.log).to.be.calledWithMatch('cypress run --record --key <record_key>')
-        expect(errors.warning).not.to.be.calledWith('PROJECT_ID_AND_KEY_BUT_MISSING_RECORD_OPTION')
-        this.expectExitWith(3)
-      })
-    })
-
-    it('logs warning when using deprecated --ci arg and env var', function () {
-      sinon.stub(env, 'get')
-      .withArgs('CYPRESS_CI_KEY')
-      .returns('asdf123foobarbaz')
-
-      return cypress.start([
-        `--run-project=${this.recordPath}`,
-        '--key=token-123',
-        '--ci',
-      ])
-      .then(() => {
-        expect(errors.warning).to.be.calledWith('CYPRESS_CI_DEPRECATED_ENV_VAR')
-        // eslint-disable-next-line no-console
-        expect(console.log).to.be.calledWithMatch('You are using the deprecated command:')
-        // eslint-disable-next-line no-console
-        expect(console.log).to.be.calledWithMatch('cypress ci')
-        // eslint-disable-next-line no-console
-        expect(console.log).to.be.calledWithMatch('cypress run --record')
         this.expectExitWith(3)
       })
     })
@@ -1519,7 +1577,7 @@ describe('lib/cypress', () => {
         osVersion: 'v1',
       })
 
-      sinon.stub(browsers, 'ensureAndGetByNameOrPath').returns({
+      sinon.stub(browsers, 'ensureAndGetByNameOrPath').resolves({
         version: '59.1.2.3',
         displayName: 'Electron',
       })
@@ -1668,7 +1726,6 @@ describe('lib/cypress', () => {
 
   context('--return-pkg', () => {
     beforeEach(() => {
-      // eslint-disable-next-line no-console
       console.log.restore()
 
       sinon.stub(console, 'log')
@@ -1677,7 +1734,6 @@ describe('lib/cypress', () => {
     it('logs package.json and exits', function () {
       return cypress.start(['--return-pkg'])
       .then(() => {
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('{"name":"cypress"')
         this.expectExitWith(0)
       })
@@ -1686,7 +1742,6 @@ describe('lib/cypress', () => {
 
   context('--version', () => {
     beforeEach(() => {
-      // eslint-disable-next-line no-console
       console.log.restore()
 
       sinon.stub(console, 'log')
@@ -1695,7 +1750,6 @@ describe('lib/cypress', () => {
     it('logs version and exits', function () {
       return cypress.start(['--version'])
       .then(() => {
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWith(pkg.version)
         this.expectExitWith(0)
       })
@@ -1704,7 +1758,6 @@ describe('lib/cypress', () => {
 
   context('--smoke-test', () => {
     beforeEach(() => {
-      // eslint-disable-next-line no-console
       console.log.restore()
 
       sinon.stub(console, 'log')
@@ -1713,7 +1766,6 @@ describe('lib/cypress', () => {
     it('logs pong value and exits', function () {
       return cypress.start(['--smoke-test', '--ping=abc123'])
       .then(() => {
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWith('abc123')
         this.expectExitWith(0)
       })
@@ -1731,7 +1783,7 @@ describe('lib/cypress', () => {
 
       sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
       sinon.stub(Windows, 'open').resolves(this.win)
-      sinon.stub(Server.prototype, 'startWebsockets')
+      sinon.stub(ServerE2E.prototype, 'startWebsockets')
       sinon.spy(Events, 'start')
       sinon.stub(electron.ipcMain, 'on')
     })
@@ -1764,8 +1816,8 @@ describe('lib/cypress', () => {
     })
 
     it('passes filtered options to Project#open and sets cli config', function () {
-      const getConfig = sinon.spy(Project.prototype, 'getConfig')
-      const open = sinon.stub(Server.prototype, 'open').resolves([])
+      const getConfig = sinon.spy(ProjectE2E.prototype, 'getConfig')
+      const open = sinon.stub(ServerE2E.prototype, 'open').resolves([])
 
       process.env.CYPRESS_FILE_SERVER_FOLDER = 'foo'
       process.env.CYPRESS_BASE_URL = 'http://localhost'
@@ -1860,7 +1912,7 @@ describe('lib/cypress', () => {
       const event = { sender: { send: sinon.stub() } }
       const warning = { message: 'Blah blah baseUrl blah blah' }
 
-      sinon.stub(Server.prototype, 'open').resolves([2121, warning])
+      sinon.stub(ServerE2E.prototype, 'open').resolves([2121, warning])
 
       return cypress.start(['--port=2121', '--config', 'pageLoadTimeout=1000', '--foo=bar', '--env=baz=baz'])
       .then(() => {
@@ -1877,7 +1929,7 @@ describe('lib/cypress', () => {
     describe('--config-file', () => {
       beforeEach(function () {
         this.filename = 'foo.bar.baz.asdf.quux.json'
-        this.open = sinon.stub(Server.prototype, 'open').resolves([])
+        this.open = sinon.stub(ServerE2E.prototype, 'open').resolves([])
       })
 
       it('reads config from a custom config file', function () {
@@ -1941,9 +1993,7 @@ describe('lib/cypress', () => {
     it('shows warning if Cypress has been started directly', () => {
       return cypress.start().then(() => {
         expect(errors.warning).to.be.calledWith('INVOKED_BINARY_OUTSIDE_NPM_MODULE')
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('It looks like you are running the Cypress binary directly.')
-        // eslint-disable-next-line no-console
         expect(console.log).to.be.calledWithMatch('https://on.cypress.io/installing-cypress')
       })
     })

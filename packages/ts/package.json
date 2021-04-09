@@ -1,14 +1,17 @@
 {
   "name": "@packages/ts",
-  "version": "0.0.0",
+  "version": "0.0.0-development",
   "private": true,
   "main": "index.js",
   "scripts": {
     "clean-deps": "rm -rf node_modules",
-    "test": "node test"
+    "postinstall": "patch-package",
+    "test": "yarn test-unit",
+    "test-unit": "node test",
+    "test-watch": "echo 'no watching of tests'"
   },
   "dependencies": {
-    "debug": "4.1.1"
+    "debug": "4.3.2"
   },
   "devDependencies": {
     "ts-node": "5.0.1"

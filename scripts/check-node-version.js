@@ -3,21 +3,8 @@ const assert = require('assert')
 
 // TODO make this check a 3rd party little tool
 
-// on CircleCI Mac machine, we need to use on of the laer executors
-// that already has Node 10 / 11
-const isMac = () => {
-  return os.platform() === 'darwin'
-}
-
 const isWindows = () => {
   return os.platform() === 'win32'
-}
-
-if (isMac() && process.env.CIRCLECI) {
-  // eslint-disable-next-line no-console
-  console.log('Skipping Node version check on CircleCI Mac')
-
-  return
 }
 
 // if we're windows + in appveyor...
@@ -39,7 +26,7 @@ if (isWindows() && process.env.APPVEYOR) {
       assert.equal(
         os.arch(),
         'ia32',
-        getErrMsg('ia32')
+        getErrMsg('ia32'),
       )
 
       break
@@ -47,7 +34,7 @@ if (isWindows() && process.env.APPVEYOR) {
       assert.equal(
         os.arch(),
         'x64',
-        getErrMsg('x64')
+        getErrMsg('x64'),
       )
 
       break
@@ -61,7 +48,7 @@ const join = require('path').join
 
 const nodeVersionNeededString = read(
   join(__dirname, '..', '.node-version'),
-  'utf8'
+  'utf8',
 )
 const nodeVersionNeeded = nodeVersionNeededString.split('.')
 
